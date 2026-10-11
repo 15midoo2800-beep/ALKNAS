@@ -4,14 +4,13 @@ package.name = alknas
 package.domain = org.alknas
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,csv,db,xlsx,ttf
-version = 0.3
+version = 0.5
 
-# إضافة pyjnius للوصول لمحرك أندرويد الصوتي
 requirements = python3,kivy,arabic-reshaper,python-bidi,openpyxl,pyjnius
 
 orientation = portrait
-# إضافة إذن تسجيل الصوت للميكروفون
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
+# أذونات: إنترنت، قراءة وكتابة ملفات، تسجيل صوت (مايك)، اهتزاز (VIBRATE)
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO,VIBRATE
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 

@@ -150,7 +150,6 @@ class AlknasApp(App):
         ''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_plate_clean ON vehicles(plate_clean)')
         
-        # جدول لحفظ سجل الأهداف المرصودة
         c.execute('''
             CREATE TABLE IF NOT EXISTS hits_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,7 +174,7 @@ class AlknasApp(App):
             return "0"
 
     def init_android_features(self):
-        """تهيئة الميكروفون، الاهتزاز، ومحرك نطق الصوت (TTS)"""
+        """تهيئة الأذونات والصوت والاهتزاز ومحرك TTS"""
         try:
             from android.permissions import request_permissions, Permission
             request_permissions([
@@ -191,9 +190,6 @@ class AlknasApp(App):
 
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
-            Locale = autoclass('java.util.Locale')
-
-            # إنشاء محرك النطق
             self.tts = TextToSpeech(PythonActivity.mActivity, None)
         except Exception as e:
             print("Android feature init error:", e)
@@ -207,14 +203,11 @@ class AlknasApp(App):
                 Context = autoclass('android.content.Context')
                 activity = PythonActivity.mActivity
                 vibrator = activity.getSystemService(Context.VIBRATOR_SERVICE)
-                
-                # نمط اهتزاز تحذيري متكرر
                 pattern = [0, 400, 150, 400, 150, 600]
                 vibrator.vibrate(pattern, -1)
             except Exception as e:
                 print("Vibrate error:", e)
 
-            # النطق الصوتي التلقائي
             if self.tts:
                 try:
                     from jnius import autoclass
@@ -275,7 +268,7 @@ class AlknasApp(App):
         ''', (clean_q,))
         row = c.fetchone()
 
-        # إذا لم يُعثر عليها، تجربة بحث جزئي إذا كان الإدخال أرقاماً فقط
+        # بحث جزئي إذا كان الإدخال أرقاماً فقط
         if not row and clean_q.isdigit() and len(clean_q) >= 3:
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
@@ -287,7 +280,6 @@ class AlknasApp(App):
 
         if row:
             plate_val, chassis, bank, model = row
-            # حفظ في سجل الأهداف
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
             c.execute('INSERT INTO hits_log (plate, bank, model, created_at) VALUES (?, ?, ?, ?)',
                       (plate_val, bank, model, now_str))
@@ -302,7 +294,7 @@ class AlknasApp(App):
                 f"الشاص: {chassis}"
             )
             self.result_panel.text = ar(res_text)
-            self.result_panel.color = (0.1, 1, 0.2, 1)  # أخضر فاقع
+            self.result_panel.color = (0.1, 1, 0.2, 1)
             self.trigger_alert(f"هدف مطلوب! {bank} {model}")
         else:
             conn.close()
@@ -310,7 +302,6 @@ class AlknasApp(App):
             self.result_panel.color = (0.9, 0.3, 0.3, 1)
 
     def show_hit_history(self, instance):
-        """عرض الأهداف السابقة التي عثر عليها الراصد"""
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
         c.execute('SELECT plate, bank, model, created_at FROM hits_log ORDER BY id DESC LIMIT 15')
@@ -339,13 +330,31 @@ class AlknasApp(App):
 
     def open_file_chooser(self, instance):
         popup_layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
-        start_path = "/sdcard/Download" if os.path.exists("/sdcard/Download") else os.path.expanduser("~")
         
-        chooser = FileChooserListView(path=start_path, filters=['*.csv', '*.xlsx', '*.txt'])
+        # فحص المسارات المتاحة للوصول للتخزين ومجلد Download
+        paths_to_try = [
+            "/storage/emulated/0/Download",
+            "/storage/emulated/0",
+            "/sdcard/Download",
+            "/sdcard",
+            os.path.expanduser("~")
+        ]
+        start_path = "/storage/emulated/0"
+        for p in paths_to_try:
+            if os.path.exists(p):
+                start_path = p
+                break
+        
+        # دعم الفلاتر بكافة أشكال الحروف
+        chooser = FileChooserListView(
+            path=start_path,
+            filters=['*.csv', '*.CSV', '*.xlsx', '*.XLSX', '*.txt', '*.TXT'],
+            dirselect=False
+        )
         popup_layout.add_widget(chooser)
 
         ctrl = BoxLayout(size_hint=(1, 0.15), spacing=10)
-        btn_sel = Button(text=ar("تأكيد الاستيراد"), font_name=FONT_PATH)
+        btn_sel = Button(text=ar("تأكيد الاختيار"), font_name=FONT_PATH)
         btn_can = Button(text=ar("إلغاء"), font_name=FONT_PATH)
         ctrl.add_widget(btn_sel)
         ctrl.add_widget(btn_can)
@@ -359,14 +368,13 @@ class AlknasApp(App):
                 pop.dismiss()
                 self.start_import_thread(selected_file)
             else:
-                self.result_panel.text = ar("لم تحدد أي ملف!")
+                self.result_panel.text = ar("لم تحدد أي ملف! اضغط على اسم الملف أولاً.")
 
         btn_sel.bind(on_press=on_confirm)
         btn_can.bind(on_press=pop.dismiss)
         pop.open()
 
     def start_import_thread(self, file_path):
-        """تشغيل الاستيراد في مسار منفصل لمنع تجميد الشاشة"""
         self.result_panel.text = ar("جاري معالجة واستيراد البيانات في الخلفية...")
         self.result_panel.color = (1, 0.8, 0.2, 1)
         threading.Thread(target=self._import_worker, args=(file_path,), daemon=True).start()
@@ -380,7 +388,7 @@ class AlknasApp(App):
         c = conn.cursor()
 
         try:
-            if file_path.endswith('.csv') or file_path.endswith('.txt'):
+            if file_path.lower().endswith(('.csv', '.txt')):
                 with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
                     reader = csv.reader(f)
                     for row in reader:
@@ -401,7 +409,7 @@ class AlknasApp(App):
                                 conn.commit()
                                 batch.clear()
 
-            elif file_path.endswith('.xlsx'):
+            elif file_path.lower().endswith('.xlsx'):
                 from openpyxl import load_workbook
                 wb = load_workbook(filename=file_path, read_only=True)
                 ws = wb.active

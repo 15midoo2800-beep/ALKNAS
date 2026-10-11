@@ -3,6 +3,7 @@ import csv
 import re
 import sqlite3
 import threading
+import shutil
 from datetime import datetime
 
 from kivy.app import App
@@ -12,7 +13,6 @@ from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.popup import Popup
-from kivy.uix.filechooser import FileChooserListView
 from kivy.utils import platform
 
 # مكتبات تصحيح وعرض العربية
@@ -22,7 +22,6 @@ from bidi.algorithm import get_display
 FONT_PATH = "font.ttf" if os.path.exists("font.ttf") else "Roboto"
 
 def ar(text):
-    """تجهيز وتصحيح النص العربي ليعرض بشكل سليم في Kivy"""
     if not text:
         return ""
     try:
@@ -31,7 +30,7 @@ def ar(text):
     except Exception:
         return str(text)
 
-# قاموس تحويل أسماء الحروف العربية المنطوقة إلى رموز الحروف الفعلية
+# قاموس تحويل أسماء الحروف العربية المنطوقة إلى رموز الحروف
 ARABIC_LETTER_NAMES = {
     'الف': 'ا', 'ألف': 'ا', 'إلف': 'ا', 'همزة': 'ا',
     'باء': 'ب', 'با': 'ب', 'بي': 'ب',
@@ -63,7 +62,6 @@ ARABIC_LETTER_NAMES = {
     'ياء': 'ي', 'يا': 'ي'
 }
 
-# قاموس تحويل الكلمات الرقمية البسيطة
 ARABIC_WORD_NUMBERS = {
     'صفر': '0', 'واحد': '1', 'اثنين': '2', 'إثنين': '2', 'تلاتة': '3', 'ثلاثة': '3',
     'اربعة': '4', 'أربعة': '4', 'خمسة': '5', 'ستة': '6', 'سبعة': '7', 'ثمانية': '8',
@@ -71,33 +69,24 @@ ARABIC_WORD_NUMBERS = {
 }
 
 def speech_to_plate_text(raw_speech):
-    """تحويل الكلمات المنطوقة (عين فاء قاف 5678) إلى (ع ف ق 5678)"""
     if not raw_speech:
         return ""
     words = raw_speech.split()
     converted_tokens = []
-    
     for word in words:
         clean_word = re.sub(r'[إأآا]', 'ا', word).strip()
-        
-        # 1. هل هي اسم حرف؟
         if clean_word in ARABIC_LETTER_NAMES:
             converted_tokens.append(ARABIC_LETTER_NAMES[clean_word])
-        # 2. هل هي اسم رقم؟
         elif clean_word in ARABIC_WORD_NUMBERS:
             converted_tokens.append(ARABIC_WORD_NUMBERS[clean_word])
-        # 3. هل الكلمة رقم عادي أو حروف عادية؟
         else:
             converted_tokens.append(word)
-            
     return "".join(converted_tokens)
 
 def normalize_text(text):
-    """تطبيع النصوص للبحث في قاعدة البيانات"""
     if not text:
         return ""
     t = str(text).strip()
-    # تحويل أي أسماء حروف إن وجدت أولاً
     t = speech_to_plate_text(t)
     t = re.sub(r'[\s\-_\/]+', '', t)
     t = re.sub(r'[إأآا]', 'ا', t)
@@ -123,7 +112,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # 2. أزرار التحكم العلوية
+        # 2. أزرار التحكم
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         
         self.btn_import = Button(
@@ -132,7 +121,7 @@ class AlknasApp(App):
             font_size='14sp',
             background_color=(0.15, 0.45, 0.35, 1)
         )
-        self.btn_import.bind(on_press=self.open_file_chooser)
+        self.btn_import.bind(on_press=self.open_system_file_picker)
         top_ctrl.add_widget(self.btn_import)
 
         self.btn_history = Button(
@@ -181,7 +170,7 @@ class AlknasApp(App):
 
         # 5. شاشة النتائج
         self.result_panel = Label(
-            text=ar("جاهز للرصد الميداني.\nانطق أو اكتب رقم اللوحة."),
+            text=ar("جاهز للرصد الميداني.\nاضغط استيراد لاختيار الملف من الهاتف."),
             font_name=FONT_PATH,
             font_size='17sp',
             size_hint=(1, 0.68),
@@ -211,7 +200,6 @@ class AlknasApp(App):
             )
         ''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_plate_clean ON vehicles(plate_clean)')
-        
         c.execute('''
             CREATE TABLE IF NOT EXISTS hits_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,7 +235,7 @@ class AlknasApp(App):
             
             from jnius import autoclass
             from android import activity
-            activity.bind(on_activity_result=self.on_voice_result)
+            activity.bind(on_activity_result=self.on_activity_callback)
 
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
@@ -297,8 +285,29 @@ class AlknasApp(App):
         except Exception as e:
             self.result_panel.text = ar(f"خطأ في فتح المايك: {str(e)}")
 
-    def on_voice_result(self, request_code, result_code, data):
-        """استقبال النتيجة الصوتية وتحديث الواجهة عبر المسار الرئيسي لـ Kivy"""
+    def open_system_file_picker(self, instance):
+        """فتح مدير ملفات أندرويد الأصلي لاختيار الملف"""
+        if platform != 'android':
+            self.result_panel.text = ar("اختيار الملف يعمل مباشرة على الهاتف.")
+            return
+
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Intent = autoclass('android.content.Intent')
+
+            intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent.setType("*/*")
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+
+            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+            currentActivity.startActivityForResult(Intent.createChooser(intent, "اختر ملف البيانات"), 2002)
+        except Exception as e:
+            self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
+
+    def on_activity_callback(self, request_code, result_code, data):
+        """استقبال نتائج الصوت (1001) والملفات (2002)"""
+        # 1. نتيجة الصوت
         if request_code == 1001 and data is not None:
             try:
                 from jnius import autoclass
@@ -306,145 +315,61 @@ class AlknasApp(App):
                 results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 if results and results.size() > 0:
                     raw_text = str(results.get(0)).strip()
-                    # تحويل أسماء الحروف إلى حروف فعلية
                     parsed_text = speech_to_plate_text(raw_text)
-                    
-                    # استخدام Clock.schedule_once لضمان كتابة النص فوراً في خانة البحث
                     Clock.schedule_once(lambda dt: self._apply_voice_search(parsed_text), 0)
             except Exception as e:
-                Clock.schedule_once(lambda dt: self._set_error(str(e)), 0)
+                Clock.schedule_once(lambda dt: self._set_msg(f"خطأ بالصوت: {e}", (0.9, 0.2, 0.2, 1)), 0)
+
+        # 2. نتيجة اختيار الملف من مدير ملفات الهاتف
+        elif request_code == 2002 and data is not None:
+            try:
+                uri = data.getData()
+                if uri is not None:
+                    Clock.schedule_once(lambda dt: self._handle_selected_uri(uri), 0)
+            except Exception as e:
+                Clock.schedule_once(lambda dt: self._set_msg(f"خطأ بالملف: {e}", (0.9, 0.2, 0.2, 1)), 0)
 
     def _apply_voice_search(self, parsed_text):
         self.input_plate.text = parsed_text
         self.search_plate(parsed_text)
 
-    def _set_error(self, err_msg):
-        self.result_panel.text = ar(f"خطأ في معالجة الصوت: {err_msg}")
+    def _set_msg(self, msg, color=(1, 1, 1, 1)):
+        self.result_panel.text = ar(msg)
+        self.result_panel.color = color
 
-    def search_plate(self, query):
-        clean_q = normalize_text(query)
-        if not clean_q:
-            self.result_panel.text = ar("يرجى إدخال أو نطق رقم اللوحة!")
-            self.result_panel.color = (1, 0.7, 0, 1)
-            return
+    def _handle_selected_uri(self, uri):
+        """نسخ الملف من الـ URI إلى الذاكرة الخاصة بالتطبيق لقراءته فوراً"""
+        self._set_msg("جاري قراءة ونسخ الملف المختار...", (1, 0.8, 0.2, 1))
+        threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
-        conn = sqlite3.connect(self.db_name)
-        c = conn.cursor()
-        
-        # 1. بحث مطابق كلي
-        c.execute('''
-            SELECT plate_original, chassis_number, bank_name, car_model 
-            FROM vehicles 
-            WHERE plate_clean = ?
-        ''', (clean_q,))
-        row = c.fetchone()
+    def _copy_and_import(self, uri):
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            activity = PythonActivity.mActivity
+            contentResolver = activity.getContentResolver()
 
-        # 2. بحث جزئي إذا لم يعثر عليها وكان الإدخال أرقاماً فقط
-        if not row and clean_q.isdigit() and len(clean_q) >= 3:
-            c.execute('''
-                SELECT plate_original, chassis_number, bank_name, car_model 
-                FROM vehicles 
-                WHERE plate_clean LIKE ?
-                LIMIT 1
-            ''', (f"%{clean_q}%",))
-            row = c.fetchone()
-
-        if row:
-            plate_val, chassis, bank, model = row
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            c.execute('INSERT INTO hits_log (plate, bank, model, created_at) VALUES (?, ?, ?, ?)',
-                      (plate_val, bank, model, now_str))
-            conn.commit()
-            conn.close()
-
-            res_text = (
-                f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
-                f"اللوحة: {plate_val}\n"
-                f"الجهة: {bank}\n"
-                f"الموديل: {model}\n"
-                f"الشاص: {chassis}"
-            )
-            self.result_panel.text = ar(res_text)
-            self.result_panel.color = (0.1, 1, 0.2, 1)
-            self.trigger_alert(f"هدف مطلوب! {bank} {model}")
-        else:
-            conn.close()
-            self.result_panel.text = ar(f"اللوحة ({clean_q}) ليست في القائمة المطلوبة.")
-            self.result_panel.color = (0.9, 0.3, 0.3, 1)
-
-    def show_hit_history(self, instance):
-        conn = sqlite3.connect(self.db_name)
-        c = conn.cursor()
-        c.execute('SELECT plate, bank, model, created_at FROM hits_log ORDER BY id DESC LIMIT 15')
-        rows = c.fetchall()
-        conn.close()
-
-        if not rows:
-            content_text = "لا توجد أهداف مسجلة حتى الآن."
-        else:
-            lines = [f"• {r[0]} | {r[1]} | {r[2]} ({r[3]})" for r in rows]
-            content_text = "\n\n".join(lines)
-
-        popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        lbl = Label(text=ar(content_text), font_name=FONT_PATH, font_size='14sp', halign='center')
-        lbl.bind(size=lbl.setter('text_size'))
-        popup_layout.add_widget(lbl)
-
-        btn_close = Button(text=ar("إغلاق"), font_name=FONT_PATH, size_hint=(1, 0.2))
-        popup_layout.add_widget(btn_close)
-
-        pop = Popup(title=ar("سجل الصيد الميداني"), content=popup_layout, size_hint=(0.9, 0.8))
-        btn_close.bind(on_press=pop.dismiss)
-        pop.open()
-
-    def open_file_chooser(self, instance):
-        popup_layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
-        
-        paths_to_try = [
-            "/storage/emulated/0/Download",
-            "/storage/emulated/0",
-            "/sdcard/Download",
-            "/sdcard",
-            os.path.expanduser("~")
-        ]
-        start_path = "/storage/emulated/0"
-        for p in paths_to_try:
-            if os.path.exists(p):
-                start_path = p
-                break
-        
-        chooser = FileChooserListView(
-            path=start_path,
-            filters=['*.csv', '*.CSV', '*.xlsx', '*.XLSX', '*.txt', '*.TXT'],
-            dirselect=False
-        )
-        popup_layout.add_widget(chooser)
-
-        ctrl = BoxLayout(size_hint=(1, 0.15), spacing=10)
-        btn_sel = Button(text=ar("تأكيد الاختيار"), font_name=FONT_PATH)
-        btn_can = Button(text=ar("إلغاء"), font_name=FONT_PATH)
-        ctrl.add_widget(btn_sel)
-        ctrl.add_widget(btn_can)
-        popup_layout.add_widget(ctrl)
-
-        pop = Popup(title=ar("اختر ملف البيانات"), content=popup_layout, size_hint=(0.95, 0.95))
-
-        def on_confirm(b):
-            if chooser.selection:
-                selected_file = chooser.selection[0]
-                pop.dismiss()
-                self.start_import_thread(selected_file)
-            else:
-                self.result_panel.text = ar("لم تحدد أي ملف! اضغط على اسم الملف أولاً.")
-
-        btn_sel.bind(on_press=on_confirm)
-        btn_can.bind(on_press=pop.dismiss)
-        pop.open()
-
-    def start_import_thread(self, file_path):
-        self.result_panel.text = ar("جاري معالجة واستيراد البيانات في الخلفية...")
-        self.result_panel.color = (1, 0.8, 0.2, 1)
-        threading.Thread(target=self._import_worker, args=(file_path,), daemon=True).start()
+            # فتح ستريم لقراءة الملف المختار
+            inputStream = contentResolver.openInputStream(uri)
+            
+            # حفظ نسخة مؤقتة داخل مجلد التطبيق
+            app_dir = App.get_running_app().user_data_dir
+            temp_path = os.path.join(app_dir, "imported_data_temp")
+            
+            with open(temp_path, "wb") as f_out:
+                buffer = bytearray(8192)
+                from jnius import JavaException
+                while True:
+                    bytesRead = inputStream.read(buffer)
+                    if bytesRead == -1:
+                        break
+                    f_out.write(buffer[:bytesRead])
+            
+            inputStream.close()
+            # بدء المعالجة
+            self._import_worker(temp_path)
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
     def _import_worker(self, file_path):
         batch = []
@@ -455,9 +380,28 @@ class AlknasApp(App):
         c = conn.cursor()
 
         try:
-            if file_path.lower().endswith(('.csv', '.txt')):
+            # محاولة القراءة كملف CSV أو نص
+            is_csv = False
+            try:
                 with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-                    reader = csv.reader(f)
+                    sample = f.read(2048)
+                    if ',' in sample or ';' in sample or '\t' in sample or '\n' in sample:
+                        is_csv = True
+            except Exception:
+                is_csv = False
+
+            if is_csv:
+                with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
+                    # فحص الفاصلة تلقائياً
+                    first_line = f.readline()
+                    delimiter = ','
+                    if ';' in first_line:
+                        delimiter = ';'
+                    elif '\t' in first_line:
+                        delimiter = '\t'
+                    f.seek(0)
+
+                    reader = csv.reader(f, delimiter=delimiter)
                     for row in reader:
                         if len(row) >= 1 and row[0].strip():
                             orig = row[0].strip()
@@ -475,8 +419,8 @@ class AlknasApp(App):
                                 ''', batch)
                                 conn.commit()
                                 batch.clear()
-
-            elif file_path.lower().endswith('.xlsx'):
+            else:
+                # إذا لم يكن CSV، نجرب مكتبة openpyxl (Excel)
                 from openpyxl import load_workbook
                 wb = load_workbook(filename=file_path, read_only=True)
                 ws = wb.active
@@ -515,12 +459,80 @@ class AlknasApp(App):
 
     def _import_done(self, count, error):
         if error:
-            self.result_panel.text = ar(f"تعذر استيراد الملف:\n{error}")
-            self.result_panel.color = (0.9, 0.2, 0.2, 1)
+            self._set_msg(f"تعذر استيراد الملف:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
-            self.result_panel.text = ar(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة.")
-            self.result_panel.color = (0.2, 0.9, 0.2, 1)
+            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة.", (0.2, 0.9, 0.2, 1))
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
+
+    def search_plate(self, query):
+        clean_q = normalize_text(query)
+        if not clean_q:
+            self._set_msg("يرجى إدخال أو نطق رقم اللوحة!", (1, 0.7, 0, 1))
+            return
+
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        c.execute('''
+            SELECT plate_original, chassis_number, bank_name, car_model 
+            FROM vehicles 
+            WHERE plate_clean = ?
+        ''', (clean_q,))
+        row = c.fetchone()
+
+        if not row and clean_q.isdigit() and len(clean_q) >= 3:
+            c.execute('''
+                SELECT plate_original, chassis_number, bank_name, car_model 
+                FROM vehicles 
+                WHERE plate_clean LIKE ?
+                LIMIT 1
+            ''', (f"%{clean_q}%",))
+            row = c.fetchone()
+
+        if row:
+            plate_val, chassis, bank, model = row
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+            c.execute('INSERT INTO hits_log (plate, bank, model, created_at) VALUES (?, ?, ?, ?)',
+                      (plate_val, bank, model, now_str))
+            conn.commit()
+            conn.close()
+
+            res_text = (
+                f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
+                f"اللوحة: {plate_val}\n"
+                f"الجهة: {bank}\n"
+                f"الموديل: {model}\n"
+                f"الشاص: {chassis}"
+            )
+            self._set_msg(res_text, (0.1, 1, 0.2, 1))
+            self.trigger_alert(f"هدف مطلوب! {bank} {model}")
+        else:
+            conn.close()
+            self._set_msg(f"اللوحة ({clean_q}) ليست في القائمة المطلوبة.", (0.9, 0.3, 0.3, 1))
+
+    def show_hit_history(self, instance):
+        conn = sqlite3.connect(self.db_name)
+        c = conn.cursor()
+        c.execute('SELECT plate, bank, model, created_at FROM hits_log ORDER BY id DESC LIMIT 15')
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            content_text = "لا توجد أهداف مسجلة حتى الآن."
+        else:
+            lines = [f"• {r[0]} | {r[1]} | {r[2]} ({r[3]})" for r in rows]
+            content_text = "\n\n".join(lines)
+
+        popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
+        lbl = Label(text=ar(content_text), font_name=FONT_PATH, font_size='14sp', halign='center')
+        lbl.bind(size=lbl.setter('text_size'))
+        popup_layout.add_widget(lbl)
+
+        btn_close = Button(text=ar("إغلاق"), font_name=FONT_PATH, size_hint=(1, 0.2))
+        popup_layout.add_widget(btn_close)
+
+        pop = Popup(title=ar("سجل الصيد الميداني"), content=popup_layout, size_hint=(0.9, 0.8))
+        btn_close.bind(on_press=pop.dismiss)
+        pop.open()
 
 if __name__ == '__main__':
     AlknasApp().run()

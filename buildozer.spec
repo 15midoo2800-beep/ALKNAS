@@ -4,15 +4,17 @@ package.name = alknas
 package.domain = org.alknas
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,csv,db,xlsx,ttf
-version = 0.1
+version = 0.3
 
-# إضافة مكتبات تشبيك وعكس الحروف العربية
-requirements = python3,kivy,arabic-reshaper,python-bidi
+# إضافة pyjnius للوصول لمحرك أندرويد الصوتي
+requirements = python3,kivy,arabic-reshaper,python-bidi,openpyxl,pyjnius
 
 orientation = portrait
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
+# إضافة إذن تسجيل الصوت للميكروفون
+android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,RECORD_AUDIO
 android.archs = arm64-v8a
 android.accept_sdk_license = True
+
 android.api = 33
 android.minapi = 21
 android.ndk = 25b

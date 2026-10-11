@@ -116,9 +116,8 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # أزرار الاستيراد والسجل
+        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
-        
         self.btn_import = Button(
             text=ar("📂 استيراد ملف (CSV/Excel)"),
             font_name=FONT_PATH,
@@ -136,10 +135,9 @@ class AlknasApp(App):
         )
         self.btn_history.bind(on_press=self.show_hit_history)
         top_ctrl.add_widget(self.btn_history)
-
         root.add_widget(top_ctrl)
 
-        # حقل إدخال اللوحة
+        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -151,7 +149,6 @@ class AlknasApp(App):
 
         # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
-        
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
             font_name=FONT_PATH,
@@ -169,10 +166,9 @@ class AlknasApp(App):
         )
         self.btn_voice.bind(on_press=self.start_voice_recognition)
         action_box.add_widget(self.btn_voice)
-
         root.add_widget(action_box)
 
-        # شاشة النتائج
+        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -207,7 +203,6 @@ class AlknasApp(App):
         ''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_plate_clean ON vehicles(plate_clean)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_digits ON vehicles(digits_only)')
-        
         c.execute('''
             CREATE TABLE IF NOT EXISTS hits_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,7 +235,6 @@ class AlknasApp(App):
                 Permission.WRITE_EXTERNAL_STORAGE,
                 Permission.VIBRATE
             ])
-            
             from jnius import autoclass
             from android import activity
             activity.bind(on_activity_result=self.on_activity_callback)
@@ -342,11 +336,11 @@ class AlknasApp(App):
         self.result_panel.color = color
 
     def _handle_selected_uri(self, uri):
-        self._set_msg("جاري استيراد ومعالجة الملف بأمان...", (1, 0.8, 0.2, 1))
+        self._set_msg("جاري استيراد ومعالجة الملف...", (1, 0.8, 0.2, 1))
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
-        """نسخ خفيف وسريع بنسبة 100% دون الوقوع في مشاكل مصفوفات جافا أو قفل المؤشرات"""
+        """نسخ الـ Stream بطريقة مستقرة وبسيطة عبر Java I/O"""
         try:
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -354,152 +348,123 @@ class AlknasApp(App):
             contentResolver = activity.getContentResolver()
 
             inputStream = contentResolver.openInputStream(uri)
-            
             app_dir = App.get_running_app().user_data_dir
             temp_path = os.path.join(app_dir, "imported_data_temp")
 
-            # استخدام FileOutputStream المباشر مع Files.copy المدمج في نظام Android
-            # لتجنب التعامل اليدوي مع مصفوفات البايتات في بايثون/جافا نهائياً
-            JavaFile = autoclass('java.io.File')
-            JavaFiles = autoclass('java.nio.file.Files')
-            JavaStandardCopyOption = autoclass('java.nio.file.StandardCopyOption')
+            FileOutputStream = autoclass('java.io.FileOutputStream')
+            outStream = FileOutputStream(temp_path)
 
-            destFile = JavaFile(temp_path)
-            # استبدال الملف المؤقت تلقائياً
-            JavaFiles.copy(
-                inputStream,
-                destFile.toPath(),
-                JavaStandardCopyOption.REPLACE_EXISTING
-            )
+            # نسخ سليم عبر دورة بايتات قياسية بدون إنشاء هياكل كائنات مجهولة
+            while True:
+                val = inputStream.read()
+                if val == -1:
+                    break
+                outStream.write(val)
+                avail = inputStream.available()
+                if avail > 0:
+                    arr = autoclass('java.lang.reflect.Array').newInstance(autoclass('java.lang.Byte').TYPE, min(avail, 32768))
+                    n = inputStream.read(arr)
+                    if n > 0:
+                        outStream.write(arr, 0, n)
+
+            outStream.flush()
+            outStream.close()
             inputStream.close()
 
             self._import_worker(temp_path)
         except Exception as e:
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
-    def _detect_encoding_and_delimiter(self, file_path):
-        with open(file_path, "rb") as f:
-            raw = f.read(8192)
-
-        # كشف ملفات Excel الحديثة (ZIP archive)
-        if raw.startswith(b'PK\x03\x04'):
-            return 'excel_xlsx', None
-
-        if raw.startswith(b'\xff\xfe'):
-            enc = 'utf-16-le'
-        elif raw.startswith(b'\xfe\xff'):
-            enc = 'utf-16-be'
-        elif raw.startswith(b'\xef\xbb\xbf'):
-            enc = 'utf-8-sig'
-        else:
-            enc = 'cp1256'
-            for candidate in ['utf-8', 'cp1256', 'windows-1256']:
-                try:
-                    text_sample = raw.decode(candidate)
-                    if any('\u0600' <= ch <= '\u06FF' for ch in text_sample):
-                        enc = candidate
-                        break
-                except UnicodeDecodeError:
-                    continue
-
-        try:
-            decoded = raw.decode(enc, errors='ignore')
-            lines = decoded.splitlines()
-            first_line = lines[0] if lines else ""
-            if '\t' in first_line:
-                delimiter = '\t'
-            elif ';' in first_line:
-                delimiter = ';'
-            else:
-                delimiter = ','
-        except Exception:
-            delimiter = ','
-
-        return enc, delimiter
-
     def _import_worker(self, file_path):
         batch = []
-        batch_size = 5000
+        batch_size = 3000
         count = 0
 
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
+        c.execute('DELETE FROM vehicles')
 
+        is_excel_success = False
+
+        # 1. قراءة ملفات Excel (openpyxl) الأصلية الناجحة
         try:
-            file_type, delimiter = self._detect_encoding_and_delimiter(file_path)
+            from openpyxl import load_workbook
+            wb = load_workbook(filename=file_path, read_only=True)
+            ws = wb.active
+            for row in ws.iter_rows(values_only=True):
+                if row and row[0]:
+                    orig = str(row[0]).strip()
+                    digits, letters = extract_tokens(orig)
+                    clean = digits + letters
+                    chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
+                    bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+                    model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
+                    batch.append((clean, digits, letters, orig, chassis, bank, model))
+                    count += 1
 
-            if file_type == 'excel_xlsx':
+                    if len(batch) >= batch_size:
+                        c.executemany('''
+                            INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', batch)
+                        batch.clear()
+            wb.close()
+            is_excel_success = True
+        except Exception:
+            is_excel_success = False
+
+        # 2. إذا لم يكن إكسل، قراءة CSV مع فحص الترميز العربي
+        if not is_excel_success:
+            encodings = ['cp1256', 'utf-8-sig', 'windows-1256', 'utf-16', 'utf-8']
+            chosen_enc = 'cp1256'
+            for enc in encodings:
                 try:
-                    import openpyxl
-                    wb = openpyxl.load_workbook(filename=file_path, read_only=True, data_only=True)
-                    ws = wb.active
-                    
-                    # لا نقوم بمسح البيانات القديمة إلا بعد التأكد من فتح الملف بنجاح
-                    c.execute('DELETE FROM vehicles')
-                    
-                    for row in ws.iter_rows(values_only=True):
-                        if row and row[0]:
-                            orig = str(row[0]).strip()
-                            digits, letters = extract_tokens(orig)
-                            clean = digits + letters
-                            chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-                            bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
-                            model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
-                            batch.append((clean, digits, letters, orig, chassis, bank, model))
-                            count += 1
-
-                            if len(batch) >= batch_size:
-                                c.executemany('''
-                                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                ''', batch)
-                                batch.clear()
-                    wb.close()
+                    with open(file_path, mode='r', encoding=enc) as f:
+                        test_str = f.read(2048)
+                        if any('\u0600' <= ch <= '\u06FF' for ch in test_str):
+                            chosen_enc = enc
+                            break
                 except Exception:
-                    raise Exception("ملف الإكسيل يتجاوز سعة الهاتف.\nاحفظ الملف بصيغة CSV واستورده في ثانية واحدة.")
-            else:
-                # قراءة CSV مع مسح البيانات داخل نفس المعاملة (Transaction Safe)
-                c.execute('DELETE FROM vehicles')
-                with open(file_path, mode='r', encoding=file_type, errors='replace') as f:
-                    reader = csv.reader(f, delimiter=delimiter)
-                    for row in reader:
-                        if len(row) >= 1 and row[0].strip():
-                            orig = row[0].strip()
-                            digits, letters = extract_tokens(orig)
-                            clean = digits + letters
-                            chassis = row[1].strip() if len(row) > 1 else ""
-                            bank = row[2].strip() if len(row) > 2 else ""
-                            model = row[3].strip() if len(row) > 3 else ""
-                            batch.append((clean, digits, letters, orig, chassis, bank, model))
-                            count += 1
+                    continue
 
-                            if len(batch) >= batch_size:
-                                c.executemany('''
-                                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                ''', batch)
-                                batch.clear()
+            with open(file_path, mode='r', encoding=chosen_enc, errors='replace') as f:
+                first_line = f.readline()
+                delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
+                f.seek(0)
+                reader = csv.reader(f, delimiter=delimiter)
+                for row in reader:
+                    if len(row) >= 1 and row[0].strip():
+                        orig = row[0].strip()
+                        digits, letters = extract_tokens(orig)
+                        clean = digits + letters
+                        chassis = row[1].strip() if len(row) > 1 else ""
+                        bank = row[2].strip() if len(row) > 2 else ""
+                        model = row[3].strip() if len(row) > 3 else ""
+                        batch.append((clean, digits, letters, orig, chassis, bank, model))
+                        count += 1
 
-            if batch:
-                c.executemany('''
-                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ''', batch)
+                        if len(batch) >= batch_size:
+                            c.executemany('''
+                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', batch)
+                            batch.clear()
 
-            conn.commit()
-            conn.close()
-            Clock.schedule_once(lambda dt: self._import_done(count, None), 0)
+        if batch:
+            c.executemany('''
+                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', batch)
 
-        except Exception as e:
-            conn.rollback()
-            conn.close()
-            Clock.schedule_once(lambda dt: self._import_done(0, str(e)), 0)
+        conn.commit()
+        conn.close()
+        Clock.schedule_once(lambda dt: self._import_done(count, None), 0)
 
     def _import_done(self, count, error):
         if error:
-            self._set_msg(f"تنبيه الاستيراد:\n{error}", (0.9, 0.2, 0.2, 1))
+            self._set_msg(f"تنبيه:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
-            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة وسليمة.", (0.2, 0.9, 0.2, 1))
+            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة.", (0.2, 0.9, 0.2, 1))
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
 
     def search_plate(self, query):

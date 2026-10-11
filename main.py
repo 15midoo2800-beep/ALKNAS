@@ -31,11 +31,74 @@ def ar(text):
     except Exception:
         return str(text)
 
+# قاموس تحويل أسماء الحروف العربية المنطوقة إلى رموز الحروف الفعلية
+ARABIC_LETTER_NAMES = {
+    'الف': 'ا', 'ألف': 'ا', 'إلف': 'ا', 'همزة': 'ا',
+    'باء': 'ب', 'با': 'ب', 'بي': 'ب',
+    'تاء': 'ت', 'تا': 'ت', 'تي': 'ت',
+    'ثاء': 'ث', 'ثا': 'ث',
+    'جيم': 'ج', 'جم': 'ج',
+    'حاء': 'ح', 'حا': 'ح',
+    'خاء': 'خ', 'خا': 'خ',
+    'دال': 'د', 'دا': 'د',
+    'ذال': 'ذ', 'ذا': 'ذ',
+    'راء': 'ر', 'را': 'ر', 'ري': 'ر',
+    'زاي': 'ز', 'زا': 'ز', 'زين': 'ز',
+    'سين': 'س', 'سا': 'س',
+    'شين': 'ش', 'شا': 'ش',
+    'صاد': 'ص', 'صا': 'ص',
+    'ضاد': 'ض', 'ضا': 'ض',
+    'طاء': 'ط', 'طا': 'ط',
+    'ظاء': 'ظ', 'ظا': 'ظ',
+    'عين': 'ع', 'عا': 'ع',
+    'غين': 'غ', 'غا': 'غ',
+    'فاء': 'ف', 'فا': 'ف', 'في': 'ف',
+    'قاف': 'ق', 'قا': 'ق',
+    'كاف': 'ك', 'كا': 'ك',
+    'لام': 'ل', 'لا': 'ل',
+    'ميم': 'م', 'ما': 'م',
+    'نون': 'ن', 'نا': 'ن',
+    'هاء': 'ه', 'ها': 'ه',
+    'واو': 'و', 'وا': 'و',
+    'ياء': 'ي', 'يا': 'ي'
+}
+
+# قاموس تحويل الكلمات الرقمية البسيطة
+ARABIC_WORD_NUMBERS = {
+    'صفر': '0', 'واحد': '1', 'اثنين': '2', 'إثنين': '2', 'تلاتة': '3', 'ثلاثة': '3',
+    'اربعة': '4', 'أربعة': '4', 'خمسة': '5', 'ستة': '6', 'سبعة': '7', 'ثمانية': '8',
+    'تمانية': '8', 'تسعة': '9'
+}
+
+def speech_to_plate_text(raw_speech):
+    """تحويل الكلمات المنطوقة (عين فاء قاف 5678) إلى (ع ف ق 5678)"""
+    if not raw_speech:
+        return ""
+    words = raw_speech.split()
+    converted_tokens = []
+    
+    for word in words:
+        clean_word = re.sub(r'[إأآا]', 'ا', word).strip()
+        
+        # 1. هل هي اسم حرف؟
+        if clean_word in ARABIC_LETTER_NAMES:
+            converted_tokens.append(ARABIC_LETTER_NAMES[clean_word])
+        # 2. هل هي اسم رقم؟
+        elif clean_word in ARABIC_WORD_NUMBERS:
+            converted_tokens.append(ARABIC_WORD_NUMBERS[clean_word])
+        # 3. هل الكلمة رقم عادي أو حروف عادية؟
+        else:
+            converted_tokens.append(word)
+            
+    return "".join(converted_tokens)
+
 def normalize_text(text):
-    """تطبيع النصوص العربية وتوحيد الهمزات وحذف المسافات للبحث الميداني الموثوق"""
+    """تطبيع النصوص للبحث في قاعدة البيانات"""
     if not text:
         return ""
     t = str(text).strip()
+    # تحويل أي أسماء حروف إن وجدت أولاً
+    t = speech_to_plate_text(t)
     t = re.sub(r'[\s\-_\/]+', '', t)
     t = re.sub(r'[إأآا]', 'ا', t)
     t = re.sub(r'ة', 'ه', t)
@@ -48,10 +111,9 @@ class AlknasApp(App):
         self.tts = None
         self.init_database()
 
-        # الواجهة الرئيسية
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
-        # 1. شريط الإحصائيات العلوي
+        # 1. شريط الإحصائيات
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -61,7 +123,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # 2. أزرار التحكم العلوية (استيراد ملف + سجل الأهداف)
+        # 2. أزرار التحكم العلوية
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         
         self.btn_import = Button(
@@ -94,7 +156,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
-        # 4. أزرار الفحص (فحص عادي + فحص صوتي سريع)
+        # 4. أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         
         self.btn_search = Button(
@@ -117,7 +179,7 @@ class AlknasApp(App):
 
         root.add_widget(action_box)
 
-        # 5. لوحة النتائج التفاعلية
+        # 5. شاشة النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nانطق أو اكتب رقم اللوحة."),
             font_name=FONT_PATH,
@@ -174,7 +236,6 @@ class AlknasApp(App):
             return "0"
 
     def init_android_features(self):
-        """تهيئة الأذونات والصوت والاهتزاز ومحرك TTS"""
         try:
             from android.permissions import request_permissions, Permission
             request_permissions([
@@ -195,7 +256,6 @@ class AlknasApp(App):
             print("Android feature init error:", e)
 
     def trigger_alert(self, text_alert):
-        """إطلاق اهتزاز قوي وتنبيه صوتي"""
         if platform == 'android':
             try:
                 from jnius import autoclass
@@ -230,7 +290,7 @@ class AlknasApp(App):
             intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-SA")
-            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق رقم اللوحة...")
+            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق اللوحة (مثلاً: ع ف ق 5678)...")
 
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
             currentActivity.startActivityForResult(intent, 1001)
@@ -238,6 +298,7 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"خطأ في فتح المايك: {str(e)}")
 
     def on_voice_result(self, request_code, result_code, data):
+        """استقبال النتيجة الصوتية وتحديث الواجهة عبر المسار الرئيسي لـ Kivy"""
         if request_code == 1001 and data is not None:
             try:
                 from jnius import autoclass
@@ -245,10 +306,20 @@ class AlknasApp(App):
                 results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 if results and results.size() > 0:
                     raw_text = str(results.get(0)).strip()
-                    self.input_plate.text = raw_text
-                    self.search_plate(raw_text)
+                    # تحويل أسماء الحروف إلى حروف فعلية
+                    parsed_text = speech_to_plate_text(raw_text)
+                    
+                    # استخدام Clock.schedule_once لضمان كتابة النص فوراً في خانة البحث
+                    Clock.schedule_once(lambda dt: self._apply_voice_search(parsed_text), 0)
             except Exception as e:
-                self.result_panel.text = ar(f"خطأ في قراءة الصوت: {str(e)}")
+                Clock.schedule_once(lambda dt: self._set_error(str(e)), 0)
+
+    def _apply_voice_search(self, parsed_text):
+        self.input_plate.text = parsed_text
+        self.search_plate(parsed_text)
+
+    def _set_error(self, err_msg):
+        self.result_panel.text = ar(f"خطأ في معالجة الصوت: {err_msg}")
 
     def search_plate(self, query):
         clean_q = normalize_text(query)
@@ -260,7 +331,7 @@ class AlknasApp(App):
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
         
-        # بحث مطابق أولاً
+        # 1. بحث مطابق كلي
         c.execute('''
             SELECT plate_original, chassis_number, bank_name, car_model 
             FROM vehicles 
@@ -268,7 +339,7 @@ class AlknasApp(App):
         ''', (clean_q,))
         row = c.fetchone()
 
-        # بحث جزئي إذا كان الإدخال أرقاماً فقط
+        # 2. بحث جزئي إذا لم يعثر عليها وكان الإدخال أرقاماً فقط
         if not row and clean_q.isdigit() and len(clean_q) >= 3:
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
@@ -298,7 +369,7 @@ class AlknasApp(App):
             self.trigger_alert(f"هدف مطلوب! {bank} {model}")
         else:
             conn.close()
-            self.result_panel.text = ar(f"اللوحة ({query}) ليست في القائمة المطلوبة.")
+            self.result_panel.text = ar(f"اللوحة ({clean_q}) ليست في القائمة المطلوبة.")
             self.result_panel.color = (0.9, 0.3, 0.3, 1)
 
     def show_hit_history(self, instance):
@@ -311,9 +382,7 @@ class AlknasApp(App):
         if not rows:
             content_text = "لا توجد أهداف مسجلة حتى الآن."
         else:
-            lines = []
-            for r in rows:
-                lines.append(f"• {r[0]} | {r[1]} | {r[2]} ({r[3]})")
+            lines = [f"• {r[0]} | {r[1]} | {r[2]} ({r[3]})" for r in rows]
             content_text = "\n\n".join(lines)
 
         popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
@@ -331,7 +400,6 @@ class AlknasApp(App):
     def open_file_chooser(self, instance):
         popup_layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
         
-        # فحص المسارات المتاحة للوصول للتخزين ومجلد Download
         paths_to_try = [
             "/storage/emulated/0/Download",
             "/storage/emulated/0",
@@ -345,7 +413,6 @@ class AlknasApp(App):
                 start_path = p
                 break
         
-        # دعم الفلاتر بكافة أشكال الحروف
         chooser = FileChooserListView(
             path=start_path,
             filters=['*.csv', '*.CSV', '*.xlsx', '*.XLSX', '*.txt', '*.TXT'],

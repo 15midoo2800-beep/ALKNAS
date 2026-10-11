@@ -30,10 +30,8 @@ def ar(text):
     except Exception:
         return str(text)
 
-# تحويل الأرقام المشرقية (الهندية) إلى غربية قياسية
 EASTERN_TO_WESTERN_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
 
-# قاموس شامل لكلمات الحروف المنطوقة
 LETTER_REPLACEMENTS = [
     (r'\b(الف|ألف|إلف|همزة)\b', 'ا'),
     (r'\b(باء|با|بي)\b', 'ب'),
@@ -76,27 +74,31 @@ LETTER_REPLACEMENTS = [
 ]
 
 def clean_speech_input(text):
-    """تحويل الكلمات المنطوقة للأحرف والأرقام بدقة"""
     if not text:
         return ""
-    t = str(text)
-    t = t.translate(EASTERN_TO_WESTERN_DIGITS)
+    t = str(text).translate(EASTERN_TO_WESTERN_DIGITS)
     for pattern, repl in LETTER_REPLACEMENTS:
         t = re.sub(pattern, repl, t)
-    # إزالة أي مسافات زائدة
     return "".join(t.split())
 
-def extract_tokens(text):
-    """استخراج الأرقام والحروف بشكل منفصل لتفادي مشكلة الترتيب والمعكوس"""
-    if not text:
-        return "", ""
-    t = clean_speech_input(text)
+def clean_arabic_chars(t):
+    """توحيد الأشكال المختلفة للأحرف العربية"""
+    if not t:
+        return ""
+    t = str(t).translate(EASTERN_TO_WESTERN_DIGITS)
     t = re.sub(r'[إأآا]', 'ا', t)
     t = re.sub(r'ة', 'ه', t)
     t = re.sub(r'ى', 'ي', t)
-    
+    return t
+
+def extract_tokens(text):
+    if not text:
+        return "", ""
+    t = clean_speech_input(text)
+    t = clean_arabic_chars(t)
     digits = "".join(re.findall(r'\d+', t))
-    letters = "".join(re.findall(r'[^\d\s\-_/]+', t))
+    # الحروف العربية أو اللاتينية فقط
+    letters = "".join(re.findall(r'[\u0600-\u06FFa-zA-Z]+', t))
     return digits, letters
 
 class AlknasApp(App):
@@ -371,6 +373,21 @@ class AlknasApp(App):
                 except: pass
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
+    def _read_file_with_encodings(self, file_path):
+        """قراءة ذكية لاختيار الترميز الصحيح (utf-8-sig أو windows-1256 لملفات إكسيل العربية)"""
+        encodings = ['utf-8-sig', 'cp1256', 'windows-1256', 'utf-8', 'latin-1']
+        for enc in encodings:
+            try:
+                with open(file_path, mode='r', encoding=enc) as f:
+                    lines = [f.readline() for _ in range(5)]
+                    # إذا احتوت العينات على نصوص عربية سليمة
+                    sample = "".join(lines)
+                    if any('\u0600' <= char <= '\u06FF' for char in sample) or ',' in sample or ';' in sample:
+                        return enc
+            except UnicodeDecodeError:
+                continue
+        return 'cp1256'  # الترميز الافتراضي للأجهزة العربية
+
     def _import_worker(self, file_path):
         batch = []
         batch_size = 5000
@@ -378,22 +395,41 @@ class AlknasApp(App):
 
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        # تفريغ الجدول القديم عند استيراد ملف جديد بالكامل
         c.execute('DELETE FROM vehicles')
         conn.commit()
 
         try:
-            is_csv = False
+            is_excel = False
             try:
-                with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-                    sample = f.read(2048)
-                    if ',' in sample or ';' in sample or '\t' in sample or '\n' in sample:
-                        is_csv = True
-            except Exception:
-                is_csv = False
+                from openpyxl import load_workbook
+                wb = load_workbook(filename=file_path, read_only=True)
+                ws = wb.active
+                for row in ws.iter_rows(values_only=True):
+                    if row and row[0]:
+                        orig = str(row[0]).strip()
+                        digits, letters = extract_tokens(orig)
+                        clean = digits + letters
+                        chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
+                        bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+                        model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
+                        batch.append((clean, digits, letters, orig, chassis, bank, model))
+                        count += 1
 
-            if is_csv:
-                with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
+                        if len(batch) >= batch_size:
+                            c.executemany('''
+                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', batch)
+                            conn.commit()
+                            batch.clear()
+                wb.close()
+                is_excel = True
+            except Exception:
+                is_excel = False
+
+            if not is_excel:
+                best_enc = self._read_file_with_encodings(file_path)
+                with open(file_path, mode='r', encoding=best_enc, errors='replace') as f:
                     first_line = f.readline()
                     delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
                     f.seek(0)
@@ -417,29 +453,6 @@ class AlknasApp(App):
                                 ''', batch)
                                 conn.commit()
                                 batch.clear()
-            else:
-                from openpyxl import load_workbook
-                wb = load_workbook(filename=file_path, read_only=True)
-                ws = wb.active
-                for row in ws.iter_rows(values_only=True):
-                    if row and row[0]:
-                        orig = str(row[0]).strip()
-                        digits, letters = extract_tokens(orig)
-                        clean = digits + letters
-                        chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-                        bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
-                        model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
-                        batch.append((clean, digits, letters, orig, chassis, bank, model))
-                        count += 1
-
-                        if len(batch) >= batch_size:
-                            c.executemany('''
-                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            ''', batch)
-                            conn.commit()
-                            batch.clear()
-                wb.close()
 
             if batch:
                 c.executemany('''
@@ -459,7 +472,7 @@ class AlknasApp(App):
         if error:
             self._set_msg(f"تعذر استيراد الملف:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
-            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة.", (0.2, 0.9, 0.2, 1))
+            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة ببيانات واضحة.", (0.2, 0.9, 0.2, 1))
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
 
     def search_plate(self, query):
@@ -472,18 +485,21 @@ class AlknasApp(App):
         c = conn.cursor()
         row = None
 
-        # 1. بحث دقيق: مطابقة الرقم والحروف معاً بغض النظر عن ترتيب كتابتها
+        # 1. مطابقة الرقم والحروف معاً بمرونة تامة
         if digits_q and letters_q:
-            # تجربة المطابقة سواء كانت الحروف قبل الرقم أو بعده
+            rev_letters = letters_q[::-1]  # تجربة الحروف المعكوسة
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
                 FROM vehicles 
-                WHERE digits_only = ? AND (letters_only = ? OR letters_only LIKE ?)
+                WHERE digits_only = ? AND (
+                    letters_only = ? OR letters_only = ? OR 
+                    letters_only LIKE ? OR letters_only LIKE ?
+                )
                 LIMIT 1
-            ''', (digits_q, letters_q, f"%{letters_q}%"))
+            ''', (digits_q, letters_q, rev_letters, f"%{letters_q}%", f"%{rev_letters}%"))
             row = c.fetchone()
 
-        # 2. بحث بالأرقام فقط إذا لم يتم تحديد الحروف بدقة
+        # 2. مطابقة بالأرقام فقط
         if not row and digits_q:
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
@@ -493,7 +509,7 @@ class AlknasApp(App):
             ''', (digits_q,))
             row = c.fetchone()
 
-        # 3. محاولة أخيرة: بحث عام
+        # 3. مطابقة عامة للبحث الحرفي
         if not row:
             clean_all = digits_q + letters_q
             c.execute('''
@@ -547,7 +563,13 @@ class AlknasApp(App):
         btn_close = Button(text=ar("إغلاق"), font_name=FONT_PATH, size_hint=(1, 0.2))
         popup_layout.add_widget(btn_close)
 
-        pop = Popup(title=ar("سجل الصيد الميداني"), content=popup_layout, size_hint=(0.9, 0.8))
+        # ضبط title_font لإلغاء المربعات من شريط العنوان
+        pop = Popup(
+            title=ar("سجل الصيد الميداني"),
+            title_font=FONT_PATH,
+            content=popup_layout,
+            size_hint=(0.9, 0.8)
+        )
         btn_close.bind(on_press=pop.dismiss)
         pop.open()
 

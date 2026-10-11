@@ -107,7 +107,7 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
-        # 1. شريط الإحصائيات
+        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -117,7 +117,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # 2. أزرار التحكم
+        # أزرار الاستيراد والسجل
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         
         self.btn_import = Button(
@@ -140,7 +140,7 @@ class AlknasApp(App):
 
         root.add_widget(top_ctrl)
 
-        # 3. حقل البحث
+        # حقل إدخال اللوحة
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -150,7 +150,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
-        # 4. أزرار الفحص
+        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         
         self.btn_search = Button(
@@ -173,7 +173,7 @@ class AlknasApp(App):
 
         root.add_widget(action_box)
 
-        # 5. شاشة النتائج
+        # شاشة النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -343,40 +343,45 @@ class AlknasApp(App):
         self.result_panel.color = color
 
     def _handle_selected_uri(self, uri):
-        self._set_msg("جاري استيراد ومعالجة الملف...", (1, 0.8, 0.2, 1))
+        self._set_msg("جاري استيراد ومعالجة الملف بأمان...", (1, 0.8, 0.2, 1))
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
-        pfd = None
         try:
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             activity = PythonActivity.mActivity
             contentResolver = activity.getContentResolver()
 
-            pfd = contentResolver.openFileDescriptor(uri, "r")
-            fd = pfd.getFd()
+            inputStream = contentResolver.openInputStream(uri)
             
             app_dir = App.get_running_app().user_data_dir
             temp_path = os.path.join(app_dir, "imported_data_temp")
-            
-            with open(fd, "rb", closefd=False) as f_in, open(temp_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            
-            pfd.close()
+
+            # قراءة آمنة عبر Buffered Streams في جافا بدون تضارب مؤشرات
+            JavaFileOutputStream = autoclass('java.io.FileOutputStream')
+            outStream = JavaFileOutputStream(temp_path)
+
+            buffer = autoclass('java.lang.reflect.Array').newInstance(autoclass('java.lang.Byte').TYPE, 32768)
+            while True:
+                bytesRead = inputStream.read(buffer)
+                if bytesRead <= 0:
+                    break
+                outStream.write(buffer, 0, bytesRead)
+
+            outStream.flush()
+            outStream.close()
+            inputStream.close()
+
             self._import_worker(temp_path)
         except Exception as e:
-            if pfd:
-                try: pfd.close()
-                except: pass
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
     def _detect_encoding_and_delimiter(self, file_path):
-        """كاشف قوي لترميزات الملفات النصية وفواصلها دون حرق الذاكرة"""
         with open(file_path, "rb") as f:
             raw = f.read(8192)
 
-        # ملفات Excel المضغوطة
+        # كشف ملفات Excel الحديثة
         if raw.startswith(b'PK\x03\x04'):
             return 'excel_xlsx', None
 
@@ -387,7 +392,7 @@ class AlknasApp(App):
         elif raw.startswith(b'\xef\xbb\xbf'):
             enc = 'utf-8-sig'
         else:
-            enc = 'cp1256'  # الترميز الأكثر انتشاراً في جداول إكسيل العربية الصادرة من ويندوز
+            enc = 'cp1256'
             for candidate in ['utf-8', 'cp1256', 'windows-1256']:
                 try:
                     text_sample = raw.decode(candidate)
@@ -426,11 +431,9 @@ class AlknasApp(App):
             file_type, delimiter = self._detect_encoding_and_delimiter(file_path)
 
             if file_type == 'excel_xlsx':
-                # محاولة قراءة آمنة لملف Excel عبر openpyxl مع معالجة استنزاف الرام
                 try:
-                    from openpyxl import load_workbook
-                    # read_only=True و data_only=True يمنعان استهلاك الذاكرة العالي
-                    wb = load_workbook(filename=file_path, read_only=True, data_only=True)
+                    import openpyxl
+                    wb = openpyxl.load_workbook(filename=file_path, read_only=True, data_only=True)
                     ws = wb.active
                     for row in ws.iter_rows(values_only=True):
                         if row and row[0]:
@@ -451,10 +454,9 @@ class AlknasApp(App):
                                 conn.commit()
                                 batch.clear()
                     wb.close()
-                except Exception as excel_err:
-                    raise Exception("ملف الإكسل ثقيل جداً على ذاكرة الهاتف. يرجى حفظه بصيغة CSV واستيراده مباشرة.")
+                except Exception:
+                    raise Exception("ملف الإكسيل ضخم جداً ويتجاوز سعة الهاتف.\nاحفظ الملف بصيغة CSV وجرب ثانية.")
             else:
-                # قراءة ملفات CSV فائقة السرعة والخفيفة
                 with open(file_path, mode='r', encoding=file_type, errors='replace') as f:
                     reader = csv.reader(f, delimiter=delimiter)
                     for row in reader:
@@ -494,7 +496,7 @@ class AlknasApp(App):
         if error:
             self._set_msg(f"تنبيه الاستيراد:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
-            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة.", (0.2, 0.9, 0.2, 1))
+            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة وسليمة.", (0.2, 0.9, 0.2, 1))
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
 
     def search_plate(self, query):

@@ -343,7 +343,7 @@ class AlknasApp(App):
         self.result_panel.color = color
 
     def _handle_selected_uri(self, uri):
-        self._set_msg("جاري فحص واستيراد الملف المختار...", (1, 0.8, 0.2, 1))
+        self._set_msg("جاري استيراد ومعالجة الملف...", (1, 0.8, 0.2, 1))
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
@@ -372,15 +372,14 @@ class AlknasApp(App):
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
     def _detect_encoding_and_delimiter(self, file_path):
-        """فحص ترميز وفواصل الملف بدقة مطلقة لمنع قراءة الطلاسم"""
+        """كاشف قوي لترميزات الملفات النصية وفواصلها دون حرق الذاكرة"""
         with open(file_path, "rb") as f:
             raw = f.read(8192)
 
-        # 1. فحص ملفات Excel الحديثة (تبدأ بـ PK لأنها Zip archive)
+        # ملفات Excel المضغوطة
         if raw.startswith(b'PK\x03\x04'):
             return 'excel_xlsx', None
 
-        # 2. فحص BOM للترميزات الشائعة
         if raw.startswith(b'\xff\xfe'):
             enc = 'utf-16-le'
         elif raw.startswith(b'\xfe\xff'):
@@ -388,19 +387,16 @@ class AlknasApp(App):
         elif raw.startswith(b'\xef\xbb\xbf'):
             enc = 'utf-8-sig'
         else:
-            # اختبار الترميزات العربية الأكثر انتشاراً
-            enc = 'utf-8'
-            for candidate in ['utf-8', 'cp1256', 'windows-1256', 'utf-16']:
+            enc = 'cp1256'  # الترميز الأكثر انتشاراً في جداول إكسيل العربية الصادرة من ويندوز
+            for candidate in ['utf-8', 'cp1256', 'windows-1256']:
                 try:
                     text_sample = raw.decode(candidate)
-                    # التأكد من وجود حروف عربية صريحة وليس رموزاً عشوائية
                     if any('\u0600' <= ch <= '\u06FF' for ch in text_sample):
                         enc = candidate
                         break
                 except UnicodeDecodeError:
                     continue
 
-        # تحديد الفاصلة (Delimiter)
         try:
             decoded = raw.decode(enc, errors='ignore')
             lines = decoded.splitlines()
@@ -429,33 +425,36 @@ class AlknasApp(App):
         try:
             file_type, delimiter = self._detect_encoding_and_delimiter(file_path)
 
-            # المسار الأول: إذا كان الملف ملف إكسيل XLSX حقيقي
             if file_type == 'excel_xlsx':
-                from openpyxl import load_workbook
-                wb = load_workbook(filename=file_path, read_only=True)
-                ws = wb.active
-                for row in ws.iter_rows(values_only=True):
-                    if row and row[0]:
-                        orig = str(row[0]).strip()
-                        digits, letters = extract_tokens(orig)
-                        clean = digits + letters
-                        chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-                        bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
-                        model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
-                        batch.append((clean, digits, letters, orig, chassis, bank, model))
-                        count += 1
+                # محاولة قراءة آمنة لملف Excel عبر openpyxl مع معالجة استنزاف الرام
+                try:
+                    from openpyxl import load_workbook
+                    # read_only=True و data_only=True يمنعان استهلاك الذاكرة العالي
+                    wb = load_workbook(filename=file_path, read_only=True, data_only=True)
+                    ws = wb.active
+                    for row in ws.iter_rows(values_only=True):
+                        if row and row[0]:
+                            orig = str(row[0]).strip()
+                            digits, letters = extract_tokens(orig)
+                            clean = digits + letters
+                            chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
+                            bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+                            model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
+                            batch.append((clean, digits, letters, orig, chassis, bank, model))
+                            count += 1
 
-                        if len(batch) >= batch_size:
-                            c.executemany('''
-                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            ''', batch)
-                            conn.commit()
-                            batch.clear()
-                wb.close()
-
-            # المسار الثاني: ملفات CSV ونصوص بترميز عربي صريح
+                            if len(batch) >= batch_size:
+                                c.executemany('''
+                                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                                ''', batch)
+                                conn.commit()
+                                batch.clear()
+                    wb.close()
+                except Exception as excel_err:
+                    raise Exception("ملف الإكسل ثقيل جداً على ذاكرة الهاتف. يرجى حفظه بصيغة CSV واستيراده مباشرة.")
             else:
+                # قراءة ملفات CSV فائقة السرعة والخفيفة
                 with open(file_path, mode='r', encoding=file_type, errors='replace') as f:
                     reader = csv.reader(f, delimiter=delimiter)
                     for row in reader:
@@ -493,7 +492,7 @@ class AlknasApp(App):
 
     def _import_done(self, count, error):
         if error:
-            self._set_msg(f"تعذر استيراد الملف:\n{error}", (0.9, 0.2, 0.2, 1))
+            self._set_msg(f"تنبيه الاستيراد:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
             self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة.", (0.2, 0.9, 0.2, 1))
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
@@ -508,7 +507,6 @@ class AlknasApp(App):
         c = conn.cursor()
         row = None
 
-        # 1. مطابقة الرقم والحروف معاً
         if digits_q and letters_q:
             rev_letters = letters_q[::-1]
             c.execute('''
@@ -522,7 +520,6 @@ class AlknasApp(App):
             ''', (digits_q, letters_q, rev_letters, f"%{letters_q}%", f"%{rev_letters}%"))
             row = c.fetchone()
 
-        # 2. مطابقة بالأرقام فقط
         if not row and digits_q:
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
@@ -532,7 +529,6 @@ class AlknasApp(App):
             ''', (digits_q,))
             row = c.fetchone()
 
-        # 3. مطابقة عامة للبحث الحرفي
         if not row:
             clean_all = digits_q + letters_q
             c.execute('''

@@ -4,17 +4,13 @@ package.name = alknas
 package.domain = org.alknas
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,csv,db,xlsx,ttf
-version = 0.6
+version = 0.7
 
-# المتطلبات: بايثون وكيفي ومكتبات العربية والإكسيل والوصول لميزات النظام
+# المكتبات الأساسية مع تضمين openpyxl و pyjnius
 requirements = python3,kivy,arabic-reshaper,python-bidi,openpyxl,pyjnius
 
 orientation = portrait
-
-# أذونات التخزين الشاملة وإدارة الملفات وتسجيل الصوت والاهتزاز
-android.permissions = INTERNET,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,MANAGE_EXTERNAL_STORAGE,RECORD_AUDIO,VIBRATE
-
-# تفعيل وضع التوافق مع التخزين للوصول إلى المجلدات الخارجية كالتنزيلات
+android.permissions = INTERNET,RECORD_AUDIO,VIBRATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
 android.manifest.application_arguments = android:requestLegacyExternalStorage="true"
 
 android.archs = arm64-v8a

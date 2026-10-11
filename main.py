@@ -3,6 +3,7 @@ import csv
 import re
 import sqlite3
 import threading
+import shutil
 from datetime import datetime
 
 from kivy.app import App
@@ -285,7 +286,7 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"خطأ في فتح المايك: {str(e)}")
 
     def open_system_file_picker(self, instance):
-        """فتح مدير ملفات أندرويد لاختيار الملف مباشرة دون استدعاء createChooser"""
+        """فتح مدير ملفات أندرويد الأصلي لاختيار الملف"""
         if platform != 'android':
             self.result_panel.text = ar("اختيار الملف يعمل مباشرة على الهاتف.")
             return
@@ -340,28 +341,30 @@ class AlknasApp(App):
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
+        """نسخ آمن للملف عبر FileDescriptor المباشر دون مشاكل bytearray"""
+        pfd = None
         try:
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             activity = PythonActivity.mActivity
             contentResolver = activity.getContentResolver()
 
-            inputStream = contentResolver.openInputStream(uri)
+            pfd = contentResolver.openFileDescriptor(uri, "r")
+            fd = pfd.getFd()
             
             app_dir = App.get_running_app().user_data_dir
             temp_path = os.path.join(app_dir, "imported_data_temp")
             
-            with open(temp_path, "wb") as f_out:
-                buffer = bytearray(16384)
-                while True:
-                    bytesRead = inputStream.read(buffer)
-                    if bytesRead == -1:
-                        break
-                    f_out.write(buffer[:bytesRead])
+            # قراءة ونسخ فوري عبر مسار نظام التشغيل مباشرة
+            with open(fd, "rb", closefd=False) as f_in, open(temp_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
             
-            inputStream.close()
+            pfd.close()
             self._import_worker(temp_path)
         except Exception as e:
+            if pfd:
+                try: pfd.close()
+                except: pass
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
     def _import_worker(self, file_path):

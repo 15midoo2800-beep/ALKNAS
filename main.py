@@ -30,69 +30,74 @@ def ar(text):
     except Exception:
         return str(text)
 
-# قاموس تحويل أسماء الحروف العربية المنطوقة إلى رموز الحروف
-ARABIC_LETTER_NAMES = {
-    'الف': 'ا', 'ألف': 'ا', 'إلف': 'ا', 'همزة': 'ا',
-    'باء': 'ب', 'با': 'ب', 'بي': 'ب',
-    'تاء': 'ت', 'تا': 'ت', 'تي': 'ت',
-    'ثاء': 'ث', 'ثا': 'ث',
-    'جيم': 'ج', 'جم': 'ج',
-    'حاء': 'ح', 'حا': 'ح',
-    'خاء': 'خ', 'خا': 'خ',
-    'دال': 'د', 'دا': 'د',
-    'ذال': 'ذ', 'ذا': 'ذ',
-    'راء': 'ر', 'را': 'ر', 'ري': 'ر',
-    'زاي': 'ز', 'زا': 'ز', 'زين': 'ز',
-    'سين': 'س', 'سا': 'س',
-    'شين': 'ش', 'شا': 'ش',
-    'صاد': 'ص', 'صا': 'ص',
-    'ضاد': 'ض', 'ضا': 'ض',
-    'طاء': 'ط', 'طا': 'ط',
-    'ظاء': 'ظ', 'ظا': 'ظ',
-    'عين': 'ع', 'عا': 'ع',
-    'غين': 'غ', 'غا': 'غ',
-    'فاء': 'ف', 'فا': 'ف', 'في': 'ف',
-    'قاف': 'ق', 'قا': 'ق',
-    'كاف': 'ك', 'كا': 'ك',
-    'لام': 'ل', 'لا': 'ل',
-    'ميم': 'م', 'ما': 'م',
-    'نون': 'ن', 'نا': 'ن',
-    'هاء': 'ه', 'ها': 'ه',
-    'واو': 'و', 'وا': 'و',
-    'ياء': 'ي', 'يا': 'ي'
-}
+# تحويل الأرقام المشرقية (الهندية) إلى غربية قياسية
+EASTERN_TO_WESTERN_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
 
-ARABIC_WORD_NUMBERS = {
-    'صفر': '0', 'واحد': '1', 'اثنين': '2', 'إثنين': '2', 'تلاتة': '3', 'ثلاثة': '3',
-    'اربعة': '4', 'أربعة': '4', 'خمسة': '5', 'ستة': '6', 'سبعة': '7', 'ثمانية': '8',
-    'تمانية': '8', 'تسعة': '9'
-}
+# قاموس شامل لكلمات الحروف المنطوقة
+LETTER_REPLACEMENTS = [
+    (r'\b(الف|ألف|إلف|همزة)\b', 'ا'),
+    (r'\b(باء|با|بي)\b', 'ب'),
+    (r'\b(تاء|تا|تي)\b', 'ت'),
+    (r'\b(ثاء|ثا)\b', 'ث'),
+    (r'\b(جيم|جم)\b', 'ج'),
+    (r'\b(حاء|حا)\b', 'ح'),
+    (r'\b(خاء|خا)\b', 'خ'),
+    (r'\b(دال|دا)\b', 'د'),
+    (r'\b(ذال|ذا)\b', 'ذ'),
+    (r'\b(راء|را|ري)\b', 'ر'),
+    (r'\b(زاي|زا|زين)\b', 'ز'),
+    (r'\b(سين|سا)\b', 'س'),
+    (r'\b(شين|شا)\b', 'ش'),
+    (r'\b(صاد|صا)\b', 'ص'),
+    (r'\b(ضاد|ضا)\b', 'ض'),
+    (r'\b(طاء|طا)\b', 'ط'),
+    (r'\b(ظاء|ظا)\b', 'ظ'),
+    (r'\b(عين|عا)\b', 'ع'),
+    (r'\b(غين|غا)\b', 'غ'),
+    (r'\b(فاء|فا|في)\b', 'ف'),
+    (r'\b(قاف|قا)\b', 'ق'),
+    (r'\b(كاف|كا)\b', 'ك'),
+    (r'\b(لام|لا)\b', 'ل'),
+    (r'\b(ميم|ما)\b', 'م'),
+    (r'\b(نون|نا)\b', 'ن'),
+    (r'\b(هاء|ها)\b', 'ه'),
+    (r'\b(واو|وا)\b', 'و'),
+    (r'\b(ياء|يا)\b', 'ي'),
+    (r'\b(صفر)\b', '0'),
+    (r'\b(واحد)\b', '1'),
+    (r'\b(اثنين|إثنين)\b', '2'),
+    (r'\b(تلاتة|ثلاثة)\b', '3'),
+    (r'\b(اربعة|أربعة)\b', '4'),
+    (r'\b(خمسة)\b', '5'),
+    (r'\b(ستة)\b', '6'),
+    (r'\b(سبعة)\b', '7'),
+    (r'\b(تمانية|ثمانية)\b', '8'),
+    (r'\b(تسعة)\b', '9'),
+]
 
-def speech_to_plate_text(raw_speech):
-    if not raw_speech:
-        return ""
-    words = raw_speech.split()
-    converted_tokens = []
-    for word in words:
-        clean_word = re.sub(r'[إأآا]', 'ا', word).strip()
-        if clean_word in ARABIC_LETTER_NAMES:
-            converted_tokens.append(ARABIC_LETTER_NAMES[clean_word])
-        elif clean_word in ARABIC_WORD_NUMBERS:
-            converted_tokens.append(ARABIC_WORD_NUMBERS[clean_word])
-        else:
-            converted_tokens.append(word)
-    return "".join(converted_tokens)
-
-def normalize_text(text):
+def clean_speech_input(text):
+    """تحويل الكلمات المنطوقة للأحرف والأرقام بدقة"""
     if not text:
         return ""
-    t = str(text).strip()
-    t = speech_to_plate_text(t)
-    t = re.sub(r'[\s\-_\/]+', '', t)
+    t = str(text)
+    t = t.translate(EASTERN_TO_WESTERN_DIGITS)
+    for pattern, repl in LETTER_REPLACEMENTS:
+        t = re.sub(pattern, repl, t)
+    # إزالة أي مسافات زائدة
+    return "".join(t.split())
+
+def extract_tokens(text):
+    """استخراج الأرقام والحروف بشكل منفصل لتفادي مشكلة الترتيب والمعكوس"""
+    if not text:
+        return "", ""
+    t = clean_speech_input(text)
     t = re.sub(r'[إأآا]', 'ا', t)
     t = re.sub(r'ة', 'ه', t)
     t = re.sub(r'ى', 'ي', t)
-    return t.upper()
+    
+    digits = "".join(re.findall(r'\d+', t))
+    letters = "".join(re.findall(r'[^\d\s\-_/]+', t))
+    return digits, letters
 
 class AlknasApp(App):
     def build(self):
@@ -137,7 +142,7 @@ class AlknasApp(App):
 
         # 3. حقل البحث
         self.input_plate = TextInput(
-            hint_text=ar("أدخل رقم اللوحة (أرقام أو حروف)..."),
+            hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
             multiline=False,
             size_hint=(1, 0.09),
@@ -170,7 +175,7 @@ class AlknasApp(App):
 
         # 5. شاشة النتائج
         self.result_panel = Label(
-            text=ar("جاهز للرصد الميداني.\nاضغط استيراد لاختيار الملف من الهاتف."),
+            text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
             font_size='17sp',
             size_hint=(1, 0.68),
@@ -192,7 +197,9 @@ class AlknasApp(App):
         c.execute('''
             CREATE TABLE IF NOT EXISTS vehicles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plate_clean TEXT UNIQUE,
+                plate_clean TEXT,
+                digits_only TEXT,
+                letters_only TEXT,
                 plate_original TEXT,
                 chassis_number TEXT,
                 bank_name TEXT,
@@ -200,6 +207,8 @@ class AlknasApp(App):
             )
         ''')
         c.execute('CREATE INDEX IF NOT EXISTS idx_plate_clean ON vehicles(plate_clean)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_digits ON vehicles(digits_only)')
+        
         c.execute('''
             CREATE TABLE IF NOT EXISTS hits_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -278,7 +287,7 @@ class AlknasApp(App):
             intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-SA")
-            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق اللوحة (مثلاً: ع ف ق 5678)...")
+            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق رقم اللوحة والحروف...")
 
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
             currentActivity.startActivityForResult(intent, 1001)
@@ -286,7 +295,6 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"خطأ في فتح المايك: {str(e)}")
 
     def open_system_file_picker(self, instance):
-        """فتح مدير ملفات أندرويد الأصلي لاختيار الملف"""
         if platform != 'android':
             self.result_panel.text = ar("اختيار الملف يعمل مباشرة على الهاتف.")
             return
@@ -306,7 +314,6 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
 
     def on_activity_callback(self, request_code, result_code, data):
-        # 1. استقبال نتيجة الصوت
         if request_code == 1001 and data is not None:
             try:
                 from jnius import autoclass
@@ -314,12 +321,11 @@ class AlknasApp(App):
                 results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 if results and results.size() > 0:
                     raw_text = str(results.get(0)).strip()
-                    parsed_text = speech_to_plate_text(raw_text)
-                    Clock.schedule_once(lambda dt: self._apply_voice_search(parsed_text), 0)
+                    cleaned_val = clean_speech_input(raw_text)
+                    Clock.schedule_once(lambda dt: self._apply_voice_search(cleaned_val), 0)
             except Exception as e:
                 Clock.schedule_once(lambda dt: self._set_msg(f"خطأ بالصوت: {e}", (0.9, 0.2, 0.2, 1)), 0)
 
-        # 2. استقبال نتيجة اختيار الملف
         elif request_code == 2002 and data is not None:
             try:
                 uri = data.getData()
@@ -341,7 +347,6 @@ class AlknasApp(App):
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
-        """نسخ آمن للملف عبر FileDescriptor المباشر دون مشاكل bytearray"""
         pfd = None
         try:
             from jnius import autoclass
@@ -355,7 +360,6 @@ class AlknasApp(App):
             app_dir = App.get_running_app().user_data_dir
             temp_path = os.path.join(app_dir, "imported_data_temp")
             
-            # قراءة ونسخ فوري عبر مسار نظام التشغيل مباشرة
             with open(fd, "rb", closefd=False) as f_in, open(temp_path, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
             
@@ -374,6 +378,9 @@ class AlknasApp(App):
 
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
+        # تفريغ الجدول القديم عند استيراد ملف جديد بالكامل
+        c.execute('DELETE FROM vehicles')
+        conn.commit()
 
         try:
             is_csv = False
@@ -395,17 +402,18 @@ class AlknasApp(App):
                     for row in reader:
                         if len(row) >= 1 and row[0].strip():
                             orig = row[0].strip()
-                            clean = normalize_text(orig)
+                            digits, letters = extract_tokens(orig)
+                            clean = digits + letters
                             chassis = row[1].strip() if len(row) > 1 else ""
                             bank = row[2].strip() if len(row) > 2 else ""
                             model = row[3].strip() if len(row) > 3 else ""
-                            batch.append((clean, orig, chassis, bank, model))
+                            batch.append((clean, digits, letters, orig, chassis, bank, model))
                             count += 1
 
                             if len(batch) >= batch_size:
                                 c.executemany('''
-                                    INSERT OR REPLACE INTO vehicles (plate_clean, plate_original, chassis_number, bank_name, car_model)
-                                    VALUES (?, ?, ?, ?, ?)
+                                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)
                                 ''', batch)
                                 conn.commit()
                                 batch.clear()
@@ -416,17 +424,18 @@ class AlknasApp(App):
                 for row in ws.iter_rows(values_only=True):
                     if row and row[0]:
                         orig = str(row[0]).strip()
-                        clean = normalize_text(orig)
+                        digits, letters = extract_tokens(orig)
+                        clean = digits + letters
                         chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
                         bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
                         model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
-                        batch.append((clean, orig, chassis, bank, model))
+                        batch.append((clean, digits, letters, orig, chassis, bank, model))
                         count += 1
 
                         if len(batch) >= batch_size:
                             c.executemany('''
-                                INSERT OR REPLACE INTO vehicles (plate_clean, plate_original, chassis_number, bank_name, car_model)
-                                VALUES (?, ?, ?, ?, ?)
+                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
                             ''', batch)
                             conn.commit()
                             batch.clear()
@@ -434,8 +443,8 @@ class AlknasApp(App):
 
             if batch:
                 c.executemany('''
-                    INSERT OR REPLACE INTO vehicles (plate_clean, plate_original, chassis_number, bank_name, car_model)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', batch)
                 conn.commit()
 
@@ -454,27 +463,45 @@ class AlknasApp(App):
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
 
     def search_plate(self, query):
-        clean_q = normalize_text(query)
-        if not clean_q:
+        digits_q, letters_q = extract_tokens(query)
+        if not digits_q and not letters_q:
             self._set_msg("يرجى إدخال أو نطق رقم اللوحة!", (1, 0.7, 0, 1))
             return
 
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        c.execute('''
-            SELECT plate_original, chassis_number, bank_name, car_model 
-            FROM vehicles 
-            WHERE plate_clean = ?
-        ''', (clean_q,))
-        row = c.fetchone()
+        row = None
 
-        if not row and clean_q.isdigit() and len(clean_q) >= 3:
+        # 1. بحث دقيق: مطابقة الرقم والحروف معاً بغض النظر عن ترتيب كتابتها
+        if digits_q and letters_q:
+            # تجربة المطابقة سواء كانت الحروف قبل الرقم أو بعده
+            c.execute('''
+                SELECT plate_original, chassis_number, bank_name, car_model 
+                FROM vehicles 
+                WHERE digits_only = ? AND (letters_only = ? OR letters_only LIKE ?)
+                LIMIT 1
+            ''', (digits_q, letters_q, f"%{letters_q}%"))
+            row = c.fetchone()
+
+        # 2. بحث بالأرقام فقط إذا لم يتم تحديد الحروف بدقة
+        if not row and digits_q:
+            c.execute('''
+                SELECT plate_original, chassis_number, bank_name, car_model 
+                FROM vehicles 
+                WHERE digits_only = ?
+                LIMIT 1
+            ''', (digits_q,))
+            row = c.fetchone()
+
+        # 3. محاولة أخيرة: بحث عام
+        if not row:
+            clean_all = digits_q + letters_q
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
                 FROM vehicles 
                 WHERE plate_clean LIKE ?
                 LIMIT 1
-            ''', (f"%{clean_q}%",))
+            ''', (f"%{clean_all}%",))
             row = c.fetchone()
 
         if row:
@@ -496,7 +523,8 @@ class AlknasApp(App):
             self.trigger_alert(f"هدف مطلوب! {bank} {model}")
         else:
             conn.close()
-            self._set_msg(f"اللوحة ({clean_q}) ليست في القائمة المطلوبة.", (0.9, 0.3, 0.3, 1))
+            display_val = f"{digits_q} {letters_q}".strip()
+            self._set_msg(f"اللوحة ({display_val}) ليست في القائمة المطلوبة.", (0.9, 0.3, 0.3, 1))
 
     def show_hit_history(self, instance):
         conn = sqlite3.connect(self.db_name)

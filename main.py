@@ -1,146 +1,130 @@
 import os
-import re
 import sqlite3
-import zipfile
-import xml.etree.ElementTree as ET
-
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
-from kivy.uix.scrollview import ScrollView
-from kivy.core.window import Window
 
-ARABIC_TO_ENG = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+# مكتبات معالجة اللغة العربية
+import arabic_reshaper
+from bidi.algorithm import get_display
 
-def normalize_digits(text):
+FONT_PATH = "font.ttf" if os.path.exists("font.ttf") else "Roboto"
+
+def ar(text):
+    """دالة لتشبيك وعكس النص العربي ليظهر بالاتجاه الصحيح في Kivy"""
     if not text:
         return ""
-    text = str(text).translate(ARABIC_TO_ENG)
-    return "".join(re.findall(r'\d+', text))
-
-def clean_letters(text):
-    if not text:
-        return ""
-    text = str(text).translate(ARABIC_TO_ENG)
-    return "".join(re.findall(r'[^\d\s\u0660-\u0669\W]+', text))
+    try:
+        reshaped = arabic_reshaper.reshape(str(text))
+        return get_display(reshaped)
+    except Exception:
+        return str(text)
 
 class AlknasApp(App):
     def build(self):
-        self.title = "القناص - رصد السيارات"
-        self.db_path = "hunter_database.db"
+        self.db_name = "plates.db"
         self.init_database()
 
         layout = BoxLayout(orientation='vertical', padding=15, spacing=10)
 
-        # عنوان رئيسي
-        self.header = Label(
-            text="🚗 محرك القناص الميداني 🚗",
-            size_hint_y=None,
-            height=45,
-            font_size='20sp',
-            bold=True
+        # عنوان التطبيق
+        self.title_label = Label(
+            text=ar("نظام القناص - رصد وبحث اللوحات"),
+            font_size='22sp',
+            font_name=FONT_PATH,
+            size_hint=(1, 0.12),
+            color=(0.2, 0.6, 1, 1)
         )
-        layout.add_widget(self.header)
+        layout.add_widget(self.title_label)
 
-        # خانة البحث
-        self.search_input = TextInput(
-            hint_text="أدخل أرقام أو حروف اللوحة (مثال: 4535 أو رمط)",
+        # حقل إدخال رقم اللوحة
+        self.input_plate = TextInput(
+            hint_text=ar("أدخل رقم اللوحة هنا..."),
+            font_name=FONT_PATH,
             multiline=False,
-            size_hint_y=None,
-            height=50,
+            size_hint=(1, 0.12),
             font_size='18sp'
         )
-        self.search_input.bind(on_text_validate=self.search_vehicle)
-        layout.add_widget(self.search_input)
+        layout.add_widget(self.input_plate)
 
         # زر البحث
         self.search_btn = Button(
-            text="بحث فوري",
-            size_hint_y=None,
-            height=50,
-            background_color=(0.1, 0.6, 0.9, 1),
-            font_size='18sp'
+            text=ar("بحث"),
+            font_name=FONT_PATH,
+            size_hint=(1, 0.12),
+            font_size='18sp',
+            background_color=(0.1, 0.4, 0.7, 1)
         )
-        self.search_btn.bind(on_press=self.search_vehicle)
+        self.search_btn.bind(on_press=self.search_plate)
         layout.add_widget(self.search_btn)
 
-        # منطقة النتائج التمريرية
-        scroll = ScrollView(size_hint=(1, 1))
+        # مساحة عرض النتائج
         self.result_label = Label(
-            text="جاهز للبحث...",
-            size_hint_y=None,
-            markup=True,
-            font_size='16sp'
+            text=ar("في انتظار إدخال الرقم..."),
+            font_name=FONT_PATH,
+            font_size='16sp',
+            size_hint=(1, 0.64),
+            halign='center',
+            valign='middle',
+            color=(1, 1, 1, 1)
         )
-        self.result_label.bind(texture_size=self.result_label.setter('size'))
-        scroll.add_widget(self.result_label)
-        layout.add_widget(scroll)
+        self.result_label.bind(size=self.result_label.setter('text_size'))
+        layout.add_widget(self.result_label)
 
         return layout
 
     def init_database(self):
-        conn = sqlite3.connect(self.db_path)
-        cur = conn.cursor()
-        cur.execute('''
-        CREATE TABLE IF NOT EXISTS vehicles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            plate_full TEXT,
-            plate_letters TEXT,
-            plate_digits TEXT,
-            model TEXT,
-            bank TEXT,
-            vin TEXT
-        )
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS vehicles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plate_number TEXT UNIQUE,
+                chassis_number TEXT,
+                bank_name TEXT,
+                car_model TEXT
+            )
         ''')
-        cur.execute('CREATE INDEX IF NOT EXISTS idx_digits ON vehicles (plate_digits)')
+        # بيانات تجريبية للفحص
+        cursor.execute('''
+            INSERT OR IGNORE INTO vehicles (plate_number, chassis_number, bank_name, car_model)
+            VALUES (?, ?, ?, ?)
+        ''', ("9788", "CHAS123456789", "بنك الراجحي", "تويوتا كامري"))
         conn.commit()
         conn.close()
 
-    def search_vehicle(self, instance):
-        query = self.search_input.text.strip()
+    def search_plate(self, instance):
+        query = self.input_plate.text.strip()
         if not query:
-            self.result_label.text = "يرجى كتابة رقم أو حروف للبحث."
+            self.result_label.text = ar("يرجى إدخال رقم اللوحة أولاً")
+            self.result_label.color = (1, 0.7, 0, 1)
             return
 
-        digits = normalize_digits(query)
-        letters = clean_letters(query)
-
-        conn = sqlite3.connect(self.db_path)
-        cur = conn.cursor()
-
-        if digits:
-            cur.execute("""
-                SELECT plate_full, plate_letters, model, bank, vin 
-                FROM vehicles 
-                WHERE plate_digits = ?
-            """, (digits,))
-        else:
-            cur.execute("""
-                SELECT plate_full, plate_letters, model, bank, vin 
-                FROM vehicles 
-                WHERE plate_letters = ?
-            """, (letters,))
-
-        matches = cur.fetchall()
-
-        if letters and len(matches) > 1:
-            filtered = [c for c in matches if letters in c[1] or c[1] in letters]
-            if filtered:
-                matches = filtered
-
+        conn = sqlite3.connect(self.db_name)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT plate_number, chassis_number, bank_name, car_model 
+            FROM vehicles 
+            WHERE plate_number = ?
+        ''', (query,))
+        row = cursor.fetchone()
         conn.close()
 
-        if matches:
-            res_text = f"[color=ff3333]🚨 [تنبيه: سيارة مطلوبة!] ({len(matches)} مطابقة):[/color]\n\n"
-            for idx, car in enumerate(matches, 1):
-                res_text += f"🔹 {idx}) اللوحة: {car[0]} | الموديل: {car[2]}\n"
-                res_text += f"    البنك: {car[3]} | الشاص: {car[4]}\n"
-                res_text += "--------------------------------------\n"
-            self.result_label.text = res_text
+        if row:
+            res_text = (
+                f"تم العثور على هدف!\n\n"
+                f"اللوحة: {row[0]}\n"
+                f"الشاص: {row[1]}\n"
+                f"الجهة / البنك: {row[2]}\n"
+                f"نوع السيارة: {row[3]}"
+            )
+            self.result_label.text = ar(res_text)
+            self.result_label.color = (0.2, 0.9, 0.2, 1)  # لون أخضر
         else:
-            self.result_label.text = f"[color=33cc33]⚪ سليمة (غير مطلوبة)[/color]\nرقم البحث: {digits or letters}"
+            self.result_label.text = ar(f"اللوحة {query} غير مطلوبة")
+            self.result_label.color = (0.8, 0.2, 0.2, 1)  # لون أحمر
 
 if __name__ == '__main__':
     AlknasApp().run()

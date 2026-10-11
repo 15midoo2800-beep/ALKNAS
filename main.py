@@ -3,7 +3,6 @@ import csv
 import re
 import sqlite3
 import threading
-import shutil
 from datetime import datetime
 
 from kivy.app import App
@@ -286,7 +285,7 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"خطأ في فتح المايك: {str(e)}")
 
     def open_system_file_picker(self, instance):
-        """فتح مدير ملفات أندرويد الأصلي لاختيار الملف"""
+        """فتح مدير ملفات أندرويد لاختيار الملف مباشرة دون استدعاء createChooser"""
         if platform != 'android':
             self.result_panel.text = ar("اختيار الملف يعمل مباشرة على الهاتف.")
             return
@@ -301,13 +300,12 @@ class AlknasApp(App):
             intent.addCategory(Intent.CATEGORY_OPENABLE)
 
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-            currentActivity.startActivityForResult(Intent.createChooser(intent, "اختر ملف البيانات"), 2002)
+            currentActivity.startActivityForResult(intent, 2002)
         except Exception as e:
             self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
 
     def on_activity_callback(self, request_code, result_code, data):
-        """استقبال نتائج الصوت (1001) والملفات (2002)"""
-        # 1. نتيجة الصوت
+        # 1. استقبال نتيجة الصوت
         if request_code == 1001 and data is not None:
             try:
                 from jnius import autoclass
@@ -320,7 +318,7 @@ class AlknasApp(App):
             except Exception as e:
                 Clock.schedule_once(lambda dt: self._set_msg(f"خطأ بالصوت: {e}", (0.9, 0.2, 0.2, 1)), 0)
 
-        # 2. نتيجة اختيار الملف من مدير ملفات الهاتف
+        # 2. استقبال نتيجة اختيار الملف
         elif request_code == 2002 and data is not None:
             try:
                 uri = data.getData()
@@ -338,7 +336,6 @@ class AlknasApp(App):
         self.result_panel.color = color
 
     def _handle_selected_uri(self, uri):
-        """نسخ الملف من الـ URI إلى الذاكرة الخاصة بالتطبيق لقراءته فوراً"""
         self._set_msg("جاري قراءة ونسخ الملف المختار...", (1, 0.8, 0.2, 1))
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
@@ -349,16 +346,13 @@ class AlknasApp(App):
             activity = PythonActivity.mActivity
             contentResolver = activity.getContentResolver()
 
-            # فتح ستريم لقراءة الملف المختار
             inputStream = contentResolver.openInputStream(uri)
             
-            # حفظ نسخة مؤقتة داخل مجلد التطبيق
             app_dir = App.get_running_app().user_data_dir
             temp_path = os.path.join(app_dir, "imported_data_temp")
             
             with open(temp_path, "wb") as f_out:
-                buffer = bytearray(8192)
-                from jnius import JavaException
+                buffer = bytearray(16384)
                 while True:
                     bytesRead = inputStream.read(buffer)
                     if bytesRead == -1:
@@ -366,7 +360,6 @@ class AlknasApp(App):
                     f_out.write(buffer[:bytesRead])
             
             inputStream.close()
-            # بدء المعالجة
             self._import_worker(temp_path)
         except Exception as e:
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
@@ -380,7 +373,6 @@ class AlknasApp(App):
         c = conn.cursor()
 
         try:
-            # محاولة القراءة كملف CSV أو نص
             is_csv = False
             try:
                 with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
@@ -392,13 +384,8 @@ class AlknasApp(App):
 
             if is_csv:
                 with open(file_path, mode='r', encoding='utf-8-sig', errors='ignore') as f:
-                    # فحص الفاصلة تلقائياً
                     first_line = f.readline()
-                    delimiter = ','
-                    if ';' in first_line:
-                        delimiter = ';'
-                    elif '\t' in first_line:
-                        delimiter = '\t'
+                    delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
                     f.seek(0)
 
                     reader = csv.reader(f, delimiter=delimiter)
@@ -420,7 +407,6 @@ class AlknasApp(App):
                                 conn.commit()
                                 batch.clear()
             else:
-                # إذا لم يكن CSV، نجرب مكتبة openpyxl (Excel)
                 from openpyxl import load_workbook
                 wb = load_workbook(filename=file_path, read_only=True)
                 ws = wb.active

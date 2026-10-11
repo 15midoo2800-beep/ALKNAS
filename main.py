@@ -3,7 +3,6 @@ import csv
 import re
 import sqlite3
 import threading
-import shutil
 from datetime import datetime
 
 from kivy.app import App
@@ -347,6 +346,7 @@ class AlknasApp(App):
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
+        """نسخ خفيف وسريع بنسبة 100% دون الوقوع في مشاكل مصفوفات جافا أو قفل المؤشرات"""
         try:
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -358,19 +358,19 @@ class AlknasApp(App):
             app_dir = App.get_running_app().user_data_dir
             temp_path = os.path.join(app_dir, "imported_data_temp")
 
-            # قراءة آمنة عبر Buffered Streams في جافا بدون تضارب مؤشرات
-            JavaFileOutputStream = autoclass('java.io.FileOutputStream')
-            outStream = JavaFileOutputStream(temp_path)
+            # استخدام FileOutputStream المباشر مع Files.copy المدمج في نظام Android
+            # لتجنب التعامل اليدوي مع مصفوفات البايتات في بايثون/جافا نهائياً
+            JavaFile = autoclass('java.io.File')
+            JavaFiles = autoclass('java.nio.file.Files')
+            JavaStandardCopyOption = autoclass('java.nio.file.StandardCopyOption')
 
-            buffer = autoclass('java.lang.reflect.Array').newInstance(autoclass('java.lang.Byte').TYPE, 32768)
-            while True:
-                bytesRead = inputStream.read(buffer)
-                if bytesRead <= 0:
-                    break
-                outStream.write(buffer, 0, bytesRead)
-
-            outStream.flush()
-            outStream.close()
+            destFile = JavaFile(temp_path)
+            # استبدال الملف المؤقت تلقائياً
+            JavaFiles.copy(
+                inputStream,
+                destFile.toPath(),
+                JavaStandardCopyOption.REPLACE_EXISTING
+            )
             inputStream.close()
 
             self._import_worker(temp_path)
@@ -381,7 +381,7 @@ class AlknasApp(App):
         with open(file_path, "rb") as f:
             raw = f.read(8192)
 
-        # كشف ملفات Excel الحديثة
+        # كشف ملفات Excel الحديثة (ZIP archive)
         if raw.startswith(b'PK\x03\x04'):
             return 'excel_xlsx', None
 
@@ -424,8 +424,6 @@ class AlknasApp(App):
 
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        c.execute('DELETE FROM vehicles')
-        conn.commit()
 
         try:
             file_type, delimiter = self._detect_encoding_and_delimiter(file_path)
@@ -435,6 +433,10 @@ class AlknasApp(App):
                     import openpyxl
                     wb = openpyxl.load_workbook(filename=file_path, read_only=True, data_only=True)
                     ws = wb.active
+                    
+                    # لا نقوم بمسح البيانات القديمة إلا بعد التأكد من فتح الملف بنجاح
+                    c.execute('DELETE FROM vehicles')
+                    
                     for row in ws.iter_rows(values_only=True):
                         if row and row[0]:
                             orig = str(row[0]).strip()
@@ -451,12 +453,13 @@ class AlknasApp(App):
                                     INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
                                     VALUES (?, ?, ?, ?, ?, ?, ?)
                                 ''', batch)
-                                conn.commit()
                                 batch.clear()
                     wb.close()
                 except Exception:
-                    raise Exception("ملف الإكسيل ضخم جداً ويتجاوز سعة الهاتف.\nاحفظ الملف بصيغة CSV وجرب ثانية.")
+                    raise Exception("ملف الإكسيل يتجاوز سعة الهاتف.\nاحفظ الملف بصيغة CSV واستورده في ثانية واحدة.")
             else:
+                # قراءة CSV مع مسح البيانات داخل نفس المعاملة (Transaction Safe)
+                c.execute('DELETE FROM vehicles')
                 with open(file_path, mode='r', encoding=file_type, errors='replace') as f:
                     reader = csv.reader(f, delimiter=delimiter)
                     for row in reader:
@@ -475,7 +478,6 @@ class AlknasApp(App):
                                     INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
                                     VALUES (?, ?, ?, ?, ?, ?, ?)
                                 ''', batch)
-                                conn.commit()
                                 batch.clear()
 
             if batch:
@@ -483,12 +485,13 @@ class AlknasApp(App):
                     INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 ''', batch)
-                conn.commit()
 
+            conn.commit()
             conn.close()
             Clock.schedule_once(lambda dt: self._import_done(count, None), 0)
 
         except Exception as e:
+            conn.rollback()
             conn.close()
             Clock.schedule_once(lambda dt: self._import_done(0, str(e)), 0)
 

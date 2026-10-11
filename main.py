@@ -82,7 +82,6 @@ def clean_speech_input(text):
     return "".join(t.split())
 
 def clean_arabic_chars(t):
-    """توحيد الأشكال المختلفة للأحرف العربية"""
     if not t:
         return ""
     t = str(t).translate(EASTERN_TO_WESTERN_DIGITS)
@@ -97,7 +96,6 @@ def extract_tokens(text):
     t = clean_speech_input(text)
     t = clean_arabic_chars(t)
     digits = "".join(re.findall(r'\d+', t))
-    # الحروف العربية أو اللاتينية فقط
     letters = "".join(re.findall(r'[\u0600-\u06FFa-zA-Z]+', t))
     return digits, letters
 
@@ -345,7 +343,7 @@ class AlknasApp(App):
         self.result_panel.color = color
 
     def _handle_selected_uri(self, uri):
-        self._set_msg("جاري قراءة ونسخ الملف المختار...", (1, 0.8, 0.2, 1))
+        self._set_msg("جاري فحص واستيراد الملف المختار...", (1, 0.8, 0.2, 1))
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
@@ -373,20 +371,50 @@ class AlknasApp(App):
                 except: pass
             Clock.schedule_once(lambda dt: self._import_done(0, f"فشل قراءة الملف: {str(e)}"), 0)
 
-    def _read_file_with_encodings(self, file_path):
-        """قراءة ذكية لاختيار الترميز الصحيح (utf-8-sig أو windows-1256 لملفات إكسيل العربية)"""
-        encodings = ['utf-8-sig', 'cp1256', 'windows-1256', 'utf-8', 'latin-1']
-        for enc in encodings:
-            try:
-                with open(file_path, mode='r', encoding=enc) as f:
-                    lines = [f.readline() for _ in range(5)]
-                    # إذا احتوت العينات على نصوص عربية سليمة
-                    sample = "".join(lines)
-                    if any('\u0600' <= char <= '\u06FF' for char in sample) or ',' in sample or ';' in sample:
-                        return enc
-            except UnicodeDecodeError:
-                continue
-        return 'cp1256'  # الترميز الافتراضي للأجهزة العربية
+    def _detect_encoding_and_delimiter(self, file_path):
+        """فحص ترميز وفواصل الملف بدقة مطلقة لمنع قراءة الطلاسم"""
+        with open(file_path, "rb") as f:
+            raw = f.read(8192)
+
+        # 1. فحص ملفات Excel الحديثة (تبدأ بـ PK لأنها Zip archive)
+        if raw.startswith(b'PK\x03\x04'):
+            return 'excel_xlsx', None
+
+        # 2. فحص BOM للترميزات الشائعة
+        if raw.startswith(b'\xff\xfe'):
+            enc = 'utf-16-le'
+        elif raw.startswith(b'\xfe\xff'):
+            enc = 'utf-16-be'
+        elif raw.startswith(b'\xef\xbb\xbf'):
+            enc = 'utf-8-sig'
+        else:
+            # اختبار الترميزات العربية الأكثر انتشاراً
+            enc = 'utf-8'
+            for candidate in ['utf-8', 'cp1256', 'windows-1256', 'utf-16']:
+                try:
+                    text_sample = raw.decode(candidate)
+                    # التأكد من وجود حروف عربية صريحة وليس رموزاً عشوائية
+                    if any('\u0600' <= ch <= '\u06FF' for ch in text_sample):
+                        enc = candidate
+                        break
+                except UnicodeDecodeError:
+                    continue
+
+        # تحديد الفاصلة (Delimiter)
+        try:
+            decoded = raw.decode(enc, errors='ignore')
+            lines = decoded.splitlines()
+            first_line = lines[0] if lines else ""
+            if '\t' in first_line:
+                delimiter = '\t'
+            elif ';' in first_line:
+                delimiter = ';'
+            else:
+                delimiter = ','
+        except Exception:
+            delimiter = ','
+
+        return enc, delimiter
 
     def _import_worker(self, file_path):
         batch = []
@@ -399,8 +427,10 @@ class AlknasApp(App):
         conn.commit()
 
         try:
-            is_excel = False
-            try:
+            file_type, delimiter = self._detect_encoding_and_delimiter(file_path)
+
+            # المسار الأول: إذا كان الملف ملف إكسيل XLSX حقيقي
+            if file_type == 'excel_xlsx':
                 from openpyxl import load_workbook
                 wb = load_workbook(filename=file_path, read_only=True)
                 ws = wb.active
@@ -423,17 +453,10 @@ class AlknasApp(App):
                             conn.commit()
                             batch.clear()
                 wb.close()
-                is_excel = True
-            except Exception:
-                is_excel = False
 
-            if not is_excel:
-                best_enc = self._read_file_with_encodings(file_path)
-                with open(file_path, mode='r', encoding=best_enc, errors='replace') as f:
-                    first_line = f.readline()
-                    delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
-                    f.seek(0)
-
+            # المسار الثاني: ملفات CSV ونصوص بترميز عربي صريح
+            else:
+                with open(file_path, mode='r', encoding=file_type, errors='replace') as f:
                     reader = csv.reader(f, delimiter=delimiter)
                     for row in reader:
                         if len(row) >= 1 and row[0].strip():
@@ -472,7 +495,7 @@ class AlknasApp(App):
         if error:
             self._set_msg(f"تعذر استيراد الملف:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
-            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة ببيانات واضحة.", (0.2, 0.9, 0.2, 1))
+            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة.", (0.2, 0.9, 0.2, 1))
             self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
 
     def search_plate(self, query):
@@ -485,9 +508,9 @@ class AlknasApp(App):
         c = conn.cursor()
         row = None
 
-        # 1. مطابقة الرقم والحروف معاً بمرونة تامة
+        # 1. مطابقة الرقم والحروف معاً
         if digits_q and letters_q:
-            rev_letters = letters_q[::-1]  # تجربة الحروف المعكوسة
+            rev_letters = letters_q[::-1]
             c.execute('''
                 SELECT plate_original, chassis_number, bank_name, car_model 
                 FROM vehicles 
@@ -563,7 +586,6 @@ class AlknasApp(App):
         btn_close = Button(text=ar("إغلاق"), font_name=FONT_PATH, size_hint=(1, 0.2))
         popup_layout.add_widget(btn_close)
 
-        # ضبط title_font لإلغاء المربعات من شريط العنوان
         pop = Popup(
             title=ar("سجل الصيد الميداني"),
             title_font=FONT_PATH,

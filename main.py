@@ -410,42 +410,67 @@ class AlknasApp(App):
             Clock.schedule_once(lambda dt: self._import_done(0, f"تعذر قراءة الملف: {str(e)}"), 0)
 
     def _parse_xlsx_safely(self, file_path):
-        """قراءة ملفات xlsx عبر محرك XML الداخلي دون استهلاك الرام"""
+        """قراءة ملفات xlsx الكبيرة بدقة متناهية مع دعم inlineStr و sharedStrings وتطابق الأعمدة"""
+        def col_letter_to_index(col_str):
+            num = 0
+            for c in col_str:
+                if 'A' <= c <= 'Z':
+                    num = num * 26 + (ord(c) - ord('A') + 1)
+            return max(0, num - 1)
+
         with zipfile.ZipFile(file_path, 'r') as z:
             shared_strings = []
             if 'xl/sharedStrings.xml' in z.namelist():
                 tree = ET.fromstring(z.read('xl/sharedStrings.xml'))
-                for elem in tree.findall('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}si'):
-                    text = "".join(t.text for t in elem.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t') if t.text)
+                ns_s = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+                for elem in tree.findall('.//ns:si', ns_s):
+                    text = "".join(t.text for t in elem.findall('.//ns:t', ns_s) if t.text)
                     shared_strings.append(text)
 
             sheet_files = [n for n in z.namelist() if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')]
             if not sheet_files:
                 return
-            target_sheet = sorted(sheet_files)[0]
+
+            target_sheet = max(sheet_files, key=lambda name: z.getinfo(name).file_size)
 
             sheet_xml = z.read(target_sheet)
             tree = ET.fromstring(sheet_xml)
             ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 
             for row_elem in tree.findall('.//ns:row', ns):
-                current_row = []
+                row_cells = {}
+                max_idx = 0
+
                 for cell in row_elem.findall('ns:c', ns):
-                    cell_type = cell.attrib.get('t')
-                    val_elem = cell.find('ns:v', ns)
-                    val = val_elem.text if val_elem is not None else ""
+                    ref = cell.attrib.get('r', '')
+                    col_letters = "".join(filter(str.isalpha, ref)).upper()
+                    col_idx = col_letter_to_index(col_letters) if col_letters else len(row_cells)
+                    max_idx = max(max_idx, col_idx)
 
-                    if cell_type == 's' and val.isdigit():
-                        idx = int(val)
-                        if idx < len(shared_strings):
-                            val = shared_strings[idx]
-                    current_row.append(clean_cell_value(val))
+                    cell_type = cell.attrib.get('t', '')
+                    val = ""
 
-                if any(current_row):
-                    yield current_row
+                    is_elem = cell.find('ns:is', ns)
+                    if is_elem is not None:
+                        val = "".join(t.text for t in is_elem.findall('.//ns:t', ns) if t.text)
+                    else:
+                        v_elem = cell.find('ns:v', ns)
+                        if v_elem is not None and v_elem.text:
+                            raw_v = v_elem.text
+                            if cell_type == 's' and raw_v.isdigit():
+                                s_idx = int(raw_v)
+                                val = shared_strings[s_idx] if s_idx < len(shared_strings) else raw_v
+                            else:
+                                val = raw_v
+
+                    row_cells[col_idx] = clean_cell_value(val)
+
+                if row_cells:
+                    current_row = [row_cells.get(i, "") for i in range(max_idx + 1)]
+                    if any(current_row):
+                        yield current_row
 
     def _iter_rows(self, file_path):
-        """مولد محمي وشامل لكل أنواع الملفات"""
         try:
             with open(file_path, "rb") as f_check:
                 header = f_check.read(8)
@@ -526,7 +551,6 @@ class AlknasApp(App):
                     chassis = ""
                     remaining = []
 
-                    # فرز رقم الشاص (VIN) تلقائياً
                     for col in other_cols:
                         if not chassis and len(col) >= 10 and re.match(r'^[A-Za-z0-9]+$', col):
                             chassis = col

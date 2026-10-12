@@ -72,7 +72,6 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
-    """معالجة وفك التشفير المزدوج للنصوص العربية"""
     if not text:
         return ""
     t = str(text).strip()
@@ -126,7 +125,6 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
-        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -136,10 +134,9 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
-            text=ar("📂 استيراد ملف (CSV)"),
+            text=ar("📂 استيراد ملف (CSV / Excel)"),
             font_name=FONT_PATH,
             font_size='14sp',
             background_color=(0.15, 0.45, 0.35, 1)
@@ -157,7 +154,6 @@ class AlknasApp(App):
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
-        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -167,7 +163,6 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
-        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
@@ -188,7 +183,6 @@ class AlknasApp(App):
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
-        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -405,75 +399,107 @@ class AlknasApp(App):
                 except Exception: pass
             Clock.schedule_once(lambda dt: self._import_done(0, f"تعذر قراءة الملف: {str(e)}"), 0)
 
+    def _iter_rows(self, file_path):
+        """مولد موحد لقراءة الأسطر سواء كان الملف CSV أو XLSX أو XLS"""
+        with open(file_path, "rb") as f_check:
+            header = f_check.read(8)
+
+        # ملف Excel حديث (XLSX - Zip Container)
+        if header.startswith(b'PK'):
+            from openpyxl import load_workbook
+            wb = load_workbook(filename=file_path, read_only=True, data_only=True)
+            sheet = wb.active
+            for row in sheet.iter_rows(values_only=True):
+                if any(row):
+                    yield [str(c) if c is not None else "" for c in row]
+            wb.close()
+            return
+
+        # ملف Excel قديم (XLS - Compound File Binary)
+        if header.startswith(b'\xd0\xcf\x11\xe0'):
+            import xlrd
+            wb = xlrd.open_workbook(file_path)
+            sheet = wb.sheet_by_index(0)
+            for row_idx in range(sheet.nrows):
+                row = sheet.row_values(row_idx)
+                if any(row):
+                    yield [str(c) if c is not None else "" for c in row]
+            return
+
+        # ملف نصي عادي (CSV)
+        encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
+        chosen_enc = 'windows-1256'
+        for enc in encodings:
+            try:
+                with open(file_path, mode='r', encoding=enc) as test_f:
+                    sample = test_f.read(4096)
+                    if any('\u0600' <= ch <= '\u06FF' for ch in sample) and not ('ط' in sample and 'ظ' in sample):
+                        chosen_enc = enc
+                        break
+            except Exception:
+                continue
+
+        with open(file_path, mode='r', encoding=chosen_enc, errors='replace') as f:
+            first_line = f.readline()
+            delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
+            f.seek(0)
+            reader = csv.reader(f, delimiter=delimiter)
+            for row in reader:
+                if row:
+                    yield row
+
     def _import_worker(self, file_path):
         batch = []
         batch_size = 5000
         count = 0
 
-        with open(file_path, "rb") as f_check:
-            header = f_check.read(4)
-        if header.startswith(b'PK'):
-            Clock.schedule_once(lambda dt: self._import_done(0, "الملف المختار هو ملف إكسيل مضغوط!\nيرجى حفظه بصيغة (CSV UTF-8) ثم اختياره."), 0)
-            return
-
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
 
         try:
-            encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
-            chosen_enc = 'windows-1256'
-
-            for enc in encodings:
-                try:
-                    with open(file_path, mode='r', encoding=enc) as test_f:
-                        sample = test_f.read(4096)
-                        if any('\u0600' <= ch <= '\u06FF' for ch in sample) and not ('ط' in sample and 'ظ' in sample):
-                            chosen_enc = enc
-                            break
-                except Exception:
-                    continue
-
             c.execute('DELETE FROM vehicles')
-            with open(file_path, mode='r', encoding=chosen_enc, errors='replace') as f:
-                first_line = f.readline()
-                delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
-                f.seek(0)
-                reader = csv.reader(f, delimiter=delimiter)
-                for row in reader:
-                    if len(row) >= 1 and str(row[0]).strip():
-                        raw_col0 = fix_mojibake(str(row[0]).strip())
-                        digits, letters = extract_tokens(raw_col0)
-                        clean = digits + letters
 
-                        other_cols = [fix_mojibake(str(col).strip()) for col in row[1:4]]
-                        while len(other_cols) < 3:
-                            other_cols.append("")
+            for row in self._iter_rows(file_path):
+                if len(row) >= 1 and str(row[0]).strip():
+                    raw_col0 = fix_mojibake(str(row[0]).strip())
+                    
+                    # تخطي صف العنوان إن وُجد
+                    if any(header_word in raw_col0 for header_word in ['لوحة', 'اللوحة', 'plate', 'Plate']):
+                        continue
 
-                        chassis = ""
-                        remaining = []
+                    digits, letters = extract_tokens(raw_col0)
+                    clean = digits + letters
 
-                        # كشف رقم الشاص الطويل بغض النظر عن ترتيب العمود
-                        for col in other_cols:
-                            if not chassis and len(col) >= 10 and re.match(r'^[A-Za-z0-9]+$', col):
-                                chassis = col
-                            else:
-                                remaining.append(col)
+                    other_cols = [fix_mojibake(str(col).strip()) for col in row[1:4]]
+                    while len(other_cols) < 3:
+                        other_cols.append("")
 
-                        while len(remaining) < 2:
-                            remaining.append("")
+                    chassis = ""
+                    remaining = []
 
-                        model = remaining[0]
-                        bank = remaining[1]
+                    # فرز رقم الشاص الطويل (VIN) تلقائياً
+                    for col in other_cols:
+                        clean_col = col.replace(".0", "") if col.endswith(".0") else col
+                        if not chassis and len(clean_col) >= 10 and re.match(r'^[A-Za-z0-9]+$', clean_col):
+                            chassis = clean_col
+                        else:
+                            remaining.append(clean_col)
 
-                        batch.append((clean, digits, letters, raw_col0, chassis, bank, model))
-                        count += 1
+                    while len(remaining) < 2:
+                        remaining.append("")
 
-                        if len(batch) >= batch_size:
-                            c.executemany('''
-                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            ''', batch)
-                            batch.clear()
+                    model = remaining[0]
+                    bank = remaining[1]
+
+                    batch.append((clean, digits, letters, raw_col0, chassis, bank, model))
+                    count += 1
+
+                    if len(batch) >= batch_size:
+                        c.executemany('''
+                            INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ''', batch)
+                        batch.clear()
 
             if batch:
                 c.executemany('''
@@ -546,7 +572,6 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
-            # عرض الحقول بالترتيب الصحيح
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"

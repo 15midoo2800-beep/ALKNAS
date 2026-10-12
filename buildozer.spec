@@ -12,7 +12,7 @@ package.domain = org.alknas.app
 # (str) Source code where the main.py lives
 source.dir = .
 
-# (list) Source files to include (let empty to include all the files)
+# (list) Source files to include (تمت إضافة ttf لتضمين الخط العربي)
 source.include_exts = py,png,jpg,kv,atlas,ttf,csv,xlsx,xls,db
 
 # (str) Application versioning
@@ -24,13 +24,13 @@ requirements = python3,kivy,arabic-reshaper,python-bidi,pyjnius,xlrd
 # (list) Supported orientations
 orientation = portrait
 
-# (list) Permissions (شاملة الكاميرا والموقع الدقيق والاهتزاز والصوت والتخزين)
+# (list) Permissions (شاملة الكاميرا والموقع الجغرافي والاهتزاز)
 android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,CAMERA
 
 # (str) Queries for Android 11+ Package Visibility
 android.manifest.queries = <intent><action android:name="android.speech.RecognitionService" /></intent>
 
-# (list) Android architectures to build for (معمارية الهواتف الحديثة 64-bit)
+# (list) Android architectures to build for
 android.archs = arm64-v8a
 
 # (int) Target Android API

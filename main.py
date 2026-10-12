@@ -72,7 +72,6 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
-    """فك ومعالجة التشفير المزدوج للنصوص العربية المشوهة"""
     if not text:
         return ""
     t = str(text).strip()
@@ -126,7 +125,6 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
-        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -136,7 +134,6 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
             text=ar("📂 استيراد ملف (CSV)"),
@@ -157,7 +154,6 @@ class AlknasApp(App):
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
-        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -167,7 +163,6 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
-        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
@@ -188,7 +183,6 @@ class AlknasApp(App):
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
-        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -264,7 +258,7 @@ class AlknasApp(App):
             TextToSpeech = autoclass('android.speech.tts.TextToSpeech')
             self.tts = TextToSpeech(PythonActivity.mActivity, None)
         except Exception as e:
-            print("Android feature init error:", e)
+            print("Android init error:", e)
 
     def trigger_alert(self, text_alert):
         if platform == 'android':
@@ -305,9 +299,17 @@ class AlknasApp(App):
             intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق رقم اللوحة والحروف...")
 
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-            currentActivity.startActivityForResult(intent, 1001)
+            packageManager = currentActivity.getPackageManager()
+            
+            # فحص دعم النظام للطلب قبل استدعائه منعاً لتجمد الواجهة والخروج المفاجئ
+            activities = packageManager.queryIntentActivities(intent, 0)
+            if activities and activities.size() > 0:
+                currentActivity.startActivityForResult(intent, 1001)
+            else:
+                self._set_msg("خدمة البحث الصوتي غير مفعلة على الهاتف.", (0.9, 0.3, 0.3, 1))
+
         except Exception as e:
-            self.result_panel.text = ar(f"خطأ في فتح المايك: {str(e)}")
+            self._set_msg("تعذر فتح المايك (تأكد من الاتصال بالإنترنت).", (0.9, 0.3, 0.3, 1))
 
     def open_system_file_picker(self, instance):
         if platform != 'android':
@@ -329,18 +331,33 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
 
     def on_activity_callback(self, request_code, result_code, data):
-        if request_code == 1001 and data is not None:
+        # معالجة إرجاع البحث الصوتي
+        if request_code == 1001:
             try:
                 from jnius import autoclass
+                Activity = autoclass('android.app.Activity')
+
+                # حماية التطبيق عند فشل النت أو الإلغاء
+                if result_code != Activity.RESULT_OK or data is None:
+                    Clock.schedule_once(
+                        lambda dt: self._set_msg("لم يتم التقاط الصوت (يتطلب إنترنت في حال عدم توفر الحزمة).", (1, 0.6, 0.2, 1)),
+                        0
+                    )
+                    return
+
                 RecognizerIntent = autoclass('android.speech.RecognizerIntent')
                 results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 if results and results.size() > 0:
                     raw_text = str(results.get(0)).strip()
                     cleaned_val = clean_speech_input(raw_text)
                     Clock.schedule_once(lambda dt: self._apply_voice_search(cleaned_val), 0)
-            except Exception as e:
-                Clock.schedule_once(lambda dt: self._set_msg(f"خطأ بالصوت: {e}", (0.9, 0.2, 0.2, 1)), 0)
+                else:
+                    Clock.schedule_once(lambda dt: self._set_msg("لم يتم التعرف على الكلمات.", (1, 0.6, 0.2, 1)), 0)
 
+            except Exception:
+                Clock.schedule_once(lambda dt: self._set_msg("خطأ أثناء استلام الصوت.", (0.9, 0.2, 0.2, 1)), 0)
+
+        # معالجة إرجاع الملف المختار
         elif request_code == 2002 and data is not None:
             try:
                 uri = data.getData()
@@ -398,7 +415,6 @@ class AlknasApp(App):
         batch_size = 5000
         count = 0
 
-        # صمام أمان لمنع حشو بايتات ملفات الإكسيل المضغوطة
         with open(file_path, "rb") as f_check:
             header = f_check.read(4)
         if header.startswith(b'PK'):
@@ -438,7 +454,7 @@ class AlknasApp(App):
                         col2 = fix_mojibake(str(row[2]).strip()) if len(row) > 2 else ""
                         col3 = fix_mojibake(str(row[3]).strip()) if len(row) > 3 else ""
 
-                        # تحديد الحقول تلقائياً: الشاص (رمز الهيكل الطويل) والموديل (اسم السيارة)
+                        # ضبط الحقول: الشاص هو الرقم الهيكلي والموديل هو اسم السيارة
                         if len(col1) > 10 and re.match(r'^[A-Za-z0-9]+$', col1):
                             chassis = col1
                             model = col2
@@ -533,7 +549,6 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
-            # قالب العرض المضبوط
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"

@@ -71,6 +71,30 @@ LETTER_REPLACEMENTS = [
     (r'\b(تسعة)\b', '9'),
 ]
 
+def fix_mojibake(text):
+    """إصلاح وتصحيح النصوص المزدوجة الترميز (windows-1256 / utf-8) تلقائياً"""
+    if not text:
+        return ""
+    t = str(text).strip()
+    # إذا كان النص يحتوي على نمط الحروف المشوهة (ط و ظ)
+    if 'ط' in t and ('ظ' in t or '¹' in t or '§' in t or '€' in t or '' in t):
+        try:
+            # إعادة التشفير إلى بايتات وفكها بالترميز الصحيح
+            raw_bytes = t.encode('windows-1252', errors='ignore')
+            fixed = raw_bytes.decode('utf-8', errors='ignore')
+            if fixed and any('\u0600' <= ch <= '\u06FF' for ch in fixed):
+                return fixed
+        except Exception:
+            pass
+        try:
+            raw_bytes = t.encode('utf-8', errors='ignore')
+            fixed = raw_bytes.decode('windows-1256', errors='ignore')
+            if fixed and any('\u0600' <= ch <= '\u06FF' for ch in fixed):
+                return fixed
+        except Exception:
+            pass
+    return t
+
 def clean_speech_input(text):
     if not text:
         return ""
@@ -82,6 +106,7 @@ def clean_speech_input(text):
 def clean_arabic_chars(t):
     if not t:
         return ""
+    t = fix_mojibake(t)
     t = str(t).translate(EASTERN_TO_WESTERN_DIGITS)
     t = re.sub(r'[إأآا]', 'ا', t)
     t = re.sub(r'ة', 'ه', t)
@@ -116,7 +141,7 @@ class AlknasApp(App):
 
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
-            text=ar("📂 استيراد ملف (CSV/Excel)"),
+            text=ar("📂 استيراد ملف (CSV)"),
             font_name=FONT_PATH,
             font_size='14sp',
             background_color=(0.15, 0.45, 0.35, 1)
@@ -203,6 +228,7 @@ class AlknasApp(App):
                 plate TEXT,
                 bank TEXT,
                 model TEXT,
+                chassis TEXT,
                 created_at TEXT
             )
         ''')
@@ -367,77 +393,60 @@ class AlknasApp(App):
 
     def _import_worker(self, file_path):
         batch = []
-        batch_size = 3000
+        batch_size = 5000
         count = 0
 
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        c.execute('DELETE FROM vehicles')
 
-        # فحص أول بايتات من الملف لمعرفة إذا كان ملف مضغوط PK (Excel حقيقي)
-        with open(file_path, "rb") as f_check:
-            header = f_check.read(4)
+        try:
+            # اختبار الترميز المباشر الأكثر ملائمة للجداول العربية
+            encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
+            chosen_enc = 'windows-1256'
 
-        is_zip = header.startswith(b'PK')
-        loaded = False
-
-        if is_zip:
-            try:
-                from openpyxl import load_workbook
-                wb = load_workbook(filename=file_path, read_only=True, data_only=True)
-                ws = wb.active
-                for row in ws.iter_rows(values_only=True):
-                    if row and row[0]:
-                        orig = str(row[0]).strip()
-                        digits, letters = extract_tokens(orig)
-                        clean = digits + letters
-                        chassis = str(row[1]).strip() if len(row) > 1 and row[1] else ""
-                        bank = str(row[2]).strip() if len(row) > 2 and row[2] else ""
-                        model = str(row[3]).strip() if len(row) > 3 and row[3] else ""
-                        batch.append((clean, digits, letters, orig, chassis, bank, model))
-                        count += 1
-
-                        if len(batch) >= batch_size:
-                            c.executemany('''
-                                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                            ''', batch)
-                            batch.clear()
-                wb.close()
-                loaded = True
-            except Exception:
-                loaded = False
-
-        if not loaded:
-            # تجربة قراءة الترميزات العربية الحقيقية بدقة
-            encodings = ['cp1256', 'utf-8-sig', 'windows-1256', 'utf-16', 'utf-8']
-            chosen_enc = 'cp1256'
-            
             for enc in encodings:
                 try:
-                    with open(file_path, mode='r', encoding=enc) as f:
-                        test_str = f.read(3000)
-                        # التأكد من وجود حروف عربية سليمة وليس علامات استفهام وطلاسم
-                        if any('\u0600' <= ch <= '\u06FF' for ch in test_str):
+                    with open(file_path, mode='r', encoding=enc) as test_f:
+                        sample = test_f.read(4096)
+                        # إذا ظهرت حروف عربية نقية بدون طلاسم
+                        if any('\u0600' <= ch <= '\u06FF' for ch in sample) and not ('ط' in sample and 'ظ' in sample):
                             chosen_enc = enc
                             break
                 except Exception:
                     continue
 
-            with open(file_path, mode='r', encoding=chosen_enc, errors='ignore') as f:
+            c.execute('DELETE FROM vehicles')
+            with open(file_path, mode='r', encoding=chosen_enc, errors='replace') as f:
                 first_line = f.readline()
                 delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
                 f.seek(0)
                 reader = csv.reader(f, delimiter=delimiter)
                 for row in reader:
                     if len(row) >= 1 and str(row[0]).strip():
-                        orig = str(row[0]).strip()
-                        digits, letters = extract_tokens(orig)
+                        raw_col0 = fix_mojibake(str(row[0]).strip())
+                        digits, letters = extract_tokens(raw_col0)
                         clean = digits + letters
-                        chassis = str(row[1]).strip() if len(row) > 1 else ""
-                        bank = str(row[2]).strip() if len(row) > 2 else ""
-                        model = str(row[3]).strip() if len(row) > 3 else ""
-                        batch.append((clean, digits, letters, orig, chassis, bank, model))
+                        
+                        col1 = fix_mojibake(str(row[1]).strip()) if len(row) > 1 else ""
+                        col2 = fix_mojibake(str(row[2]).strip()) if len(row) > 2 else ""
+                        col3 = fix_mojibake(str(row[3]).strip()) if len(row) > 3 else ""
+
+                        # تحديد الموديل والشاص والبنك تلقائياً بحسب المحتوى
+                        # الشاص عادة يكون إنجليزي ورقمي طويل (أكثر من 10 خانات)
+                        if len(col1) > 10 and re.match(r'^[A-Za-z0-9]+$', col1):
+                            chassis = col1
+                            model = col2
+                            bank = col3
+                        elif len(col2) > 10 and re.match(r'^[A-Za-z0-9]+$', col2):
+                            chassis = col2
+                            model = col1
+                            bank = col3
+                        else:
+                            chassis = col1
+                            bank = col2
+                            model = col3
+
+                        batch.append((clean, digits, letters, raw_col0, chassis, bank, model))
                         count += 1
 
                         if len(batch) >= batch_size:
@@ -447,15 +456,19 @@ class AlknasApp(App):
                             ''', batch)
                             batch.clear()
 
-        if batch:
-            c.executemany('''
-                INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', batch)
+            if batch:
+                c.executemany('''
+                    INSERT INTO vehicles (plate_clean, digits_only, letters_only, plate_original, chassis_number, bank_name, car_model)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', batch)
 
-        conn.commit()
-        conn.close()
-        Clock.schedule_once(lambda dt: self._import_done(count, None), 0)
+            conn.commit()
+            conn.close()
+            Clock.schedule_once(lambda dt: self._import_done(count, None), 0)
+
+        except Exception as e:
+            conn.close()
+            Clock.schedule_once(lambda dt: self._import_done(0, str(e)), 0)
 
     def _import_done(self, count, error):
         if error:
@@ -509,20 +522,20 @@ class AlknasApp(App):
         if row:
             plate_val, chassis, bank, model = row
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-            c.execute('INSERT INTO hits_log (plate, bank, model, created_at) VALUES (?, ?, ?, ?)',
-                      (plate_val, bank, model, now_str))
+            c.execute('INSERT INTO hits_log (plate, bank, model, chassis, created_at) VALUES (?, ?, ?, ?, ?)',
+                      (plate_val, bank, model, chassis, now_str))
             conn.commit()
             conn.close()
 
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"
-                f"الجهة: {bank}\n"
                 f"الموديل: {model}\n"
-                f"الشاص: {chassis}"
+                f"الشاص: {chassis}\n"
+                f"الجهة: {bank}"
             )
             self._set_msg(res_text, (0.1, 1, 0.2, 1))
-            self.trigger_alert(f"هدف مطلوب! {bank} {model}")
+            self.trigger_alert(f"هدف مطلوب! {model}")
         else:
             conn.close()
             display_val = f"{digits_q} {letters_q}".strip()
@@ -531,14 +544,14 @@ class AlknasApp(App):
     def show_hit_history(self, instance):
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        c.execute('SELECT plate, bank, model, created_at FROM hits_log ORDER BY id DESC LIMIT 15')
+        c.execute('SELECT plate, model, chassis, bank, created_at FROM hits_log ORDER BY id DESC LIMIT 15')
         rows = c.fetchall()
         conn.close()
 
         if not rows:
             content_text = "لا توجد أهداف مسجلة حتى الآن."
         else:
-            lines = [f"• {r[0]} | {r[1]} | {r[2]} ({r[3]})" for r in rows]
+            lines = [f"• {r[0]} | {r[1]} | {r[2]} ({r[4]})" for r in rows]
             content_text = "\n\n".join(lines)
 
         popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)

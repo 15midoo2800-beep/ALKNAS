@@ -20,15 +20,13 @@ from kivy.uix.checkbox import CheckBox
 from kivy.uix.popup import Popup
 from kivy.utils import platform
 
-import arabic_reshaper
-from bidi.algorithm import get_display
-
-FONT_PATH = "font.ttf" if os.path.exists("font.ttf") else "Roboto"
-
+# حماية معالجة النصوص العربية
 def ar(text):
     if not text:
         return ""
     try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
         reshaped = arabic_reshaper.reshape(str(text))
         return get_display(reshaped)
     except Exception:
@@ -131,9 +129,10 @@ def extract_tokens(text):
     letters = "".join(re.findall(r'[\u0600-\u06FFa-zA-Z]+', t))
     return digits, letters
 
+# كروت وأزرار محصنة تماماً ضد أخطاء OpenGL والأبعاد الصفرية
 class GlowCard(BoxLayout):
     def __init__(self, bg_color=(0.04, 0.07, 0.09, 0.95), border_color=(0, 0.9, 0.45, 1),
-                 radius=[22], line_width=1.8, **kwargs):
+                 radius=[18], line_width=1.5, **kwargs):
         super().__init__(**kwargs)
         self.bg_color = bg_color
         self.border_color = border_color
@@ -143,71 +142,57 @@ class GlowCard(BoxLayout):
 
     def _redraw(self, *args):
         self.canvas.before.clear()
+        if self.width <= 0 or self.height <= 0:
+            return
         with self.canvas.before:
-            if self.border_color:
-                Color(self.border_color[0], self.border_color[1], self.border_color[2], 0.15)
-                RoundedRectangle(pos=(self.pos[0] - 3, self.pos[1] - 3),
-                                 size=(self.size[0] + 6, self.size[1] + 6),
-                                 radius=[r + 3 for r in self.radius])
             Color(*self.bg_color)
             RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-            if self.border_color and self.size[0] > 0 and self.size[1] > 0:
+            if self.border_color:
                 Color(*self.border_color)
-                Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius[0]),
+                Line(rounded_rectangle=(self.x, self.y, self.width, self.height, self.radius[0]),
                      width=self.line_width)
 
 class CyberPillButton(Button):
     def __init__(self, bg_color=(0.08, 0.12, 0.16, 1), border_color=(0.1, 0.6, 0.4, 0.8),
-                 glow_color=(0.1, 0.6, 0.4, 0.2), radius=[18], **kwargs):
+                 radius=[16], **kwargs):
         super().__init__(**kwargs)
         self.background_color = (0, 0, 0, 0)
         self.background_normal = ''
         self.bg_color = bg_color
         self.border_color = border_color
-        self.glow_color = glow_color
         self.radius = radius
         self.bind(pos=self._redraw, size=self._redraw)
 
     def _redraw(self, *args):
         self.canvas.before.clear()
+        if self.width <= 0 or self.height <= 0:
+            return
         with self.canvas.before:
-            if self.glow_color:
-                Color(*self.glow_color)
-                RoundedRectangle(pos=(self.pos[0] - 2, self.pos[1] - 2),
-                                 size=(self.size[0] + 4, self.size[1] + 4),
-                                 radius=[r + 2 for r in self.radius])
             Color(*self.bg_color)
             RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-            if self.border_color and self.size[0] > 0 and self.size[1] > 0:
+            if self.border_color:
                 Color(*self.border_color)
-                Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius[0]),
-                     width=1.4)
+                Line(rounded_rectangle=(self.x, self.y, self.width, self.height, self.radius[0]),
+                     width=1.2)
 
-class SaudiPlateFrame(BoxLayout):
+class PlateBox(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.orientation = 'horizontal'
-        self.padding = [12, 8]
         self.bind(pos=self._redraw, size=self._redraw)
 
     def _redraw(self, *args):
         self.canvas.before.clear()
+        if self.width <= 0 or self.height <= 0:
+            return
         with self.canvas.before:
             Color(0.12, 0.15, 0.19, 1)
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[24])
-            Color(0.04, 0.05, 0.07, 1)
-            RoundedRectangle(pos=(self.pos[0] + 5, self.pos[1] + 5),
-                             size=(max(0, self.size[0] - 10), max(0, self.size[1] - 10)), radius=[20])
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[18])
             Color(0.97, 0.98, 1.0, 1)
-            RoundedRectangle(pos=(self.pos[0] + 12, self.pos[1] + 12),
-                             size=(max(0, self.size[0] - 24), max(0, self.size[1] - 24)), radius=[16])
+            RoundedRectangle(pos=(self.x + 6, self.y + 6),
+                             size=(max(0, self.width - 12), max(0, self.height - 12)), radius=[14])
             Color(0.15, 0.15, 0.15, 1)
-            if self.size[0] > 30 and self.size[1] > 30:
-                Line(rounded_rectangle=(self.pos[0] + 15, self.pos[1] + 15, max(0, self.size[0] - 30), max(0, self.size[1] - 30), 14),
-                     width=1.4)
-                divider_x = self.pos[0] + max(0, self.size[0] - 78)
-                Line(points=[divider_x, self.pos[1] + 15,
-                             divider_x, self.pos[1] + max(15, self.size[1] - 15)], width=1.2)
+            Line(rounded_rectangle=(self.x + 8, self.y + 8, max(0, self.width - 16), max(0, self.height - 16), 12),
+                 width=1.2)
 
 class AlknasApp(App):
     def build(self):
@@ -218,24 +203,24 @@ class AlknasApp(App):
         self.pending_photo_path = None
         self.pending_report_text = ""
 
-        root = BoxLayout(orientation='vertical', padding=[16, 12], spacing=10)
+        # الحاوية الرئيسية
+        root = BoxLayout(orientation='vertical', padding=[14, 10], spacing=8)
         with root.canvas.before:
             Color(0.03, 0.04, 0.06, 1)
-            RoundedRectangle(pos=root.pos, size=root.size)
+            self.bg_rect = RoundedRectangle(pos=root.pos, size=root.size)
         root.bind(pos=self._update_bg, size=self._update_bg)
 
-        # 1. شريط العنوان
-        header = BoxLayout(orientation='horizontal', size_hint=(1, 0.09), spacing=8)
+        # 1. شريط العنوان والعداد
+        header = BoxLayout(orientation='horizontal', size_hint=(1, 0.08), spacing=8)
         self.badge_box = GlowCard(
             bg_color=(0.04, 0.14, 0.09, 0.9),
             border_color=(0.1, 0.9, 0.45, 1),
-            radius=[16],
-            size_hint=(0.42, 1),
-            padding=[8, 4]
+            radius=[14],
+            size_hint=(0.45, 1),
+            padding=[4, 2]
         )
         self.lbl_targets = Label(
-            text=ar("~ جاري التحميل ~\nأهداف مسجلة"),
-            font_name=FONT_PATH,
+            text=ar("~ جاري الفحص ~\nأهداف مسجلة"),
             font_size='11sp',
             bold=True,
             halign='center',
@@ -248,28 +233,25 @@ class AlknasApp(App):
 
         self.lbl_app_title = Label(
             text=ar("القناص 🎯"),
-            font_name=FONT_PATH,
             font_size='22sp',
             bold=True,
             color=(1, 1, 1, 1),
             halign='right',
             valign='middle',
-            size_hint=(0.58, 1)
+            size_hint=(0.55, 1)
         )
         self.lbl_app_title.bind(size=self.lbl_app_title.setter('text_size'))
         header.add_widget(self.lbl_app_title)
         root.add_widget(header)
 
-        # 2. أزرار التحكم
-        top_actions = BoxLayout(orientation='horizontal', spacing=10, size_hint=(1, 0.075))
+        # 2. أزرار السجل والاستيراد
+        top_actions = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.07))
         self.btn_history = CyberPillButton(
             text=ar("📋 سجل الأهداف"),
-            font_name=FONT_PATH,
             font_size='13sp',
             bold=True,
             bg_color=(0.08, 0.11, 0.16, 1),
             border_color=(0.2, 0.35, 0.5, 0.8),
-            glow_color=(0.1, 0.25, 0.45, 0.2),
             color=(0.85, 0.92, 1, 1)
         )
         self.btn_history.bind(on_press=self.show_hit_history)
@@ -277,41 +259,37 @@ class AlknasApp(App):
 
         self.btn_import = CyberPillButton(
             text=ar("📁 استيراد ملف"),
-            font_name=FONT_PATH,
             font_size='13sp',
             bold=True,
             bg_color=(0.05, 0.16, 0.13, 1),
             border_color=(0.1, 0.65, 0.45, 0.9),
-            glow_color=(0.1, 0.5, 0.35, 0.25),
             color=(0.7, 1.0, 0.85, 1)
         )
         self.btn_import.bind(on_press=self.open_system_file_picker)
         top_actions.add_widget(self.btn_import)
         root.add_widget(top_actions)
 
-        # 3. إطار لوحة السيارة السعودية
-        plate_container = SaudiPlateFrame(size_hint=(1, 0.16))
+        # 3. إطار لوحة السيارة للإدخال
+        plate_container = PlateBox(orientation='horizontal', size_hint=(1, 0.14), padding=[10, 6])
         self.input_plate = TextInput(
             hint_text=ar("١٩٥٥ ح هـ ن"),
-            font_name=FONT_PATH,
             multiline=False,
-            size_hint=(0.8, 1),
-            font_size='26sp',
+            size_hint=(0.82, 1),
+            font_size='24sp',
             bold=True,
             background_color=(0, 0, 0, 0),
             foreground_color=(0.08, 0.08, 0.08, 1),
             halign='center',
-            padding=[8, 20]
+            padding=[4, 14]
         )
         plate_container.add_widget(self.input_plate)
 
         ksa_side = Label(
             text="🇸🇦\nKSA",
-            font_name=FONT_PATH,
             font_size='11sp',
             bold=True,
             color=(0.1, 0.4, 0.2, 1),
-            size_hint=(0.2, 1),
+            size_hint=(0.18, 1),
             halign='center',
             valign='middle'
         )
@@ -320,15 +298,13 @@ class AlknasApp(App):
         root.add_widget(plate_container)
 
         # 4. أزرار الفحص
-        action_row = BoxLayout(orientation='horizontal', spacing=12, size_hint=(1, 0.09))
+        action_row = BoxLayout(orientation='horizontal', spacing=10, size_hint=(1, 0.085))
         self.btn_voice = CyberPillButton(
             text=ar("🎙️ فحص بالصوت"),
-            font_name=FONT_PATH,
             font_size='15sp',
             bold=True,
             bg_color=(0.35, 0.05, 0.08, 0.9),
             border_color=(0.95, 0.15, 0.25, 1),
-            glow_color=(0.9, 0.1, 0.2, 0.35),
             color=(1, 0.85, 0.88, 1)
         )
         self.btn_voice.bind(on_press=self.start_voice_recognition)
@@ -336,12 +312,10 @@ class AlknasApp(App):
 
         self.btn_search = CyberPillButton(
             text=ar("🔍 فحص اللوحة"),
-            font_name=FONT_PATH,
             font_size='15sp',
             bold=True,
             bg_color=(0.05, 0.22, 0.38, 0.9),
             border_color=(0.0, 0.75, 1.0, 1),
-            glow_color=(0.0, 0.6, 0.95, 0.35),
             color=(0.85, 0.95, 1, 1)
         )
         self.btn_search.bind(on_press=lambda x: self.search_plate(self.input_plate.text))
@@ -352,16 +326,15 @@ class AlknasApp(App):
         self.result_card = GlowCard(
             bg_color=(0.03, 0.07, 0.08, 0.95),
             border_color=(0.0, 0.95, 0.45, 1),
-            radius=[24],
-            line_width=2.0,
+            radius=[20],
+            line_width=1.8,
             orientation='vertical',
-            padding=[16, 10],
-            spacing=6,
-            size_hint=(1, 0.48)
+            padding=[14, 8],
+            spacing=4,
+            size_hint=(1, 0.525)
         )
         self.badge_status = Label(
             text=ar("⚡ نتائج الفحص النشط ⚡"),
-            font_name=FONT_PATH,
             font_size='13sp',
             bold=True,
             color=(0.3, 1.0, 0.6, 1),
@@ -374,7 +347,6 @@ class AlknasApp(App):
 
         self.result_panel = Label(
             text=ar("رادار القناص نشط ومستعد.\n\nانطق رقم اللوحة أو اكتبه للفحص التلقائي."),
-            font_name=FONT_PATH,
             font_size='15sp',
             halign='center',
             valign='middle',
@@ -387,12 +359,10 @@ class AlknasApp(App):
 
         self.btn_send_whatsapp = CyberPillButton(
             text=ar("🚀 إرسال الموقع والبيانات للواتساب"),
-            font_name=FONT_PATH,
             font_size='14sp',
             bold=True,
             bg_color=(0.05, 0.35, 0.15, 0.9),
             border_color=(0.1, 0.95, 0.45, 1),
-            glow_color=(0.1, 0.8, 0.3, 0.3),
             color=(1, 1, 1, 1),
             size_hint=(1, 0.18)
         )
@@ -402,19 +372,17 @@ class AlknasApp(App):
         self.result_card.add_widget(self.btn_send_whatsapp)
         root.add_widget(self.result_card)
 
-        # تهيئة الخدمات بعد أن تصبح الواجهة جاهزة بالكامل على الشاشة
-        Clock.schedule_once(self._post_init, 0.25)
+        # تأخير أي استعلامات أو عمليات حتى تستقر الشاشة بالكامل
+        Clock.schedule_once(self._post_init, 0.4)
 
         return root
 
     def _update_bg(self, instance, *args):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            Color(0.03, 0.04, 0.06, 1)
-            RoundedRectangle(pos=instance.pos, size=instance.size)
+        if hasattr(self, 'bg_rect'):
+            self.bg_rect.pos = instance.pos
+            self.bg_rect.size = instance.size
 
     def _post_init(self, dt):
-        """تشغيل قاعدة البيانات والخدمات بأمان دون التسبب بإغلاق التطبيق"""
         try:
             if platform == 'android':
                 self.db_name = os.path.join(self.user_data_dir, "plates.db")
@@ -424,55 +392,58 @@ class AlknasApp(App):
             self.init_database()
             self.lbl_targets.text = ar(f"~ {self.get_total_records()} ~\nأهداف مسجلة")
         except Exception as e:
-            print("Post init error:", e)
+            print("DB Post Init Exception:", e)
 
         if platform == 'android':
             try:
                 self.init_android_features()
             except Exception as e:
-                print("Android features init error:", e)
+                print("Android Features Exception:", e)
 
     def init_database(self):
-        conn = sqlite3.connect(self.db_name)
-        c = conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS vehicles (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plate_clean TEXT,
-                digits_only TEXT,
-                letters_only TEXT,
-                plate_original TEXT,
-                chassis_number TEXT,
-                bank_name TEXT,
-                car_model TEXT
-            )
-        ''')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_plate_clean ON vehicles(plate_clean)')
-        c.execute('CREATE INDEX IF NOT EXISTS idx_digits ON vehicles(digits_only)')
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS hits_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                plate TEXT,
-                bank TEXT,
-                model TEXT,
-                chassis TEXT,
-                created_at TEXT
-            )
-        ''')
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        ''')
-        c.execute('SELECT value FROM settings WHERE key="wa_number"')
-        row = c.fetchone()
-        if row:
-            self.saved_whatsapp_number = row[0]
-        else:
-            c.execute('INSERT INTO settings VALUES ("wa_number", "966500000000")')
-        conn.commit()
-        conn.close()
+        try:
+            conn = sqlite3.connect(self.db_name)
+            c = conn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS vehicles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plate_clean TEXT,
+                    digits_only TEXT,
+                    letters_only TEXT,
+                    plate_original TEXT,
+                    chassis_number TEXT,
+                    bank_name TEXT,
+                    car_model TEXT
+                )
+            ''')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_plate_clean ON vehicles(plate_clean)')
+            c.execute('CREATE INDEX IF NOT EXISTS idx_digits ON vehicles(digits_only)')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS hits_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plate TEXT,
+                    bank TEXT,
+                    model TEXT,
+                    chassis TEXT,
+                    created_at TEXT
+                )
+            ''')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            ''')
+            c.execute('SELECT value FROM settings WHERE key="wa_number"')
+            row = c.fetchone()
+            if row:
+                self.saved_whatsapp_number = row[0]
+            else:
+                c.execute('INSERT INTO settings VALUES ("wa_number", "966500000000")')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print("init_database error:", e)
 
     def get_total_records(self):
         try:
@@ -965,10 +936,9 @@ class AlknasApp(App):
 
         box = BoxLayout(orientation='vertical', padding=12, spacing=10)
 
-        box.add_widget(Label(text=ar("رقم الواتساب المستلم (مع كود الدولة):"), font_name=FONT_PATH, font_size='13sp', size_hint=(1, 0.12)))
+        box.add_widget(Label(text=ar("رقم الواتساب المستلم (مع كود الدولة):"), font_size='13sp', size_hint=(1, 0.12)))
         input_phone = TextInput(
             text=self.saved_whatsapp_number,
-            font_name=FONT_PATH,
             multiline=False,
             font_size='15sp',
             size_hint=(1, 0.15),
@@ -976,22 +946,22 @@ class AlknasApp(App):
         )
         box.add_widget(input_phone)
 
-        box.add_widget(Label(text=ar("تخصيص البيانات المرسلة:"), font_name=FONT_PATH, font_size='13sp', size_hint=(1, 0.12)))
+        box.add_widget(Label(text=ar("تخصيص البيانات المرسلة:"), font_size='13sp', size_hint=(1, 0.12)))
         
         checks_grid = GridLayout(cols=2, spacing=6, size_hint=(1, 0.4))
         
         cb_plate = CheckBox(active=True, size_hint=(0.2, 1))
-        lbl_plate = Label(text=ar("بيانات اللوحة والسيارة"), font_name=FONT_PATH, font_size='12sp', size_hint=(0.8, 1))
+        lbl_plate = Label(text=ar("بيانات اللوحة والسيارة"), font_size='12sp', size_hint=(0.8, 1))
         checks_grid.add_widget(lbl_plate)
         checks_grid.add_widget(cb_plate)
 
         cb_loc = CheckBox(active=True, size_hint=(0.2, 1))
-        lbl_loc = Label(text=ar("الموقع الجغرافي (GPS خرائط)"), font_name=FONT_PATH, font_size='12sp', size_hint=(0.8, 1))
+        lbl_loc = Label(text=ar("الموقع الجغرافي (GPS خرائط)"), font_size='12sp', size_hint=(0.8, 1))
         checks_grid.add_widget(lbl_loc)
         checks_grid.add_widget(cb_loc)
 
         cb_camera = CheckBox(active=False, size_hint=(0.2, 1))
-        lbl_camera = Label(text=ar("📸 فتح الكاميرا وتصوير السيارة"), font_name=FONT_PATH, font_size='12sp', size_hint=(0.8, 1))
+        lbl_camera = Label(text=ar("📸 فتح الكاميرا وتصوير السيارة"), font_size='12sp', size_hint=(0.8, 1))
         checks_grid.add_widget(lbl_camera)
         checks_grid.add_widget(cb_camera)
 
@@ -999,7 +969,6 @@ class AlknasApp(App):
 
         btn_confirm = CyberPillButton(
             text=ar("🚀 تنفيذ وإرسال"),
-            font_name=FONT_PATH,
             font_size='14sp',
             bold=True,
             bg_color=(0.1, 0.65, 0.35, 1),
@@ -1009,7 +978,6 @@ class AlknasApp(App):
 
         dialog = Popup(
             title=ar("تخصيص إرسال الهدف"),
-            title_font=FONT_PATH,
             content=box,
             size_hint=(0.92, 0.75),
             background_color=(0.04, 0.06, 0.09, 0.96)
@@ -1102,17 +1070,16 @@ class AlknasApp(App):
             content_text = "\n\n".join(lines)
 
         popup_layout = BoxLayout(orientation='vertical', padding=14, spacing=12)
-        lbl = Label(text=ar(content_text), font_name=FONT_PATH, font_size='14sp', halign='center', color=(0.9, 0.9, 0.9, 1))
+        lbl = Label(text=ar(content_text), font_size='14sp', halign='center', color=(0.9, 0.9, 0.9, 1))
         lbl.bind(size=lbl.setter('text_size'))
         popup_layout.add_widget(lbl)
 
-        btn_close = CyberPillButton(text=ar("إغلاق السجل"), font_name=FONT_PATH, size_hint=(1, 0.18),
+        btn_close = CyberPillButton(text=ar("إغلاق السجل"), font_size='14sp', size_hint=(1, 0.18),
                                   bg_color=(0.1, 0.15, 0.22, 1), border_color=(0.3, 0.5, 0.7, 1))
         popup_layout.add_widget(btn_close)
 
         pop = Popup(
             title=ar("سجل الأهداف المكتشفة"),
-            title_font=FONT_PATH,
             content=popup_layout,
             size_hint=(0.9, 0.82),
             background_color=(0.03, 0.04, 0.06, 0.96)

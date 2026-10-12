@@ -303,7 +303,7 @@ class AlknasApp(App):
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
             currentActivity.startActivityForResult(intent, 1001)
         except Exception:
-            self.result_panel.text = ar("تعذر فتح الميكروفون.")
+            self._set_msg("تعذر فتح الميكروفون حالياً.", (0.9, 0.4, 0.4, 1))
 
     def open_system_file_picker(self, instance):
         if platform != 'android':
@@ -351,28 +351,52 @@ class AlknasApp(App):
         self._dispatch_to_whatsapp(self.saved_whatsapp_number, self.pending_report_text, None)
 
     def on_activity_callback(self, request_code, result_code, data):
-        if request_code == 1001 and data is not None:
-            try:
+        try:
+            if request_code == 1001:
                 from jnius import autoclass
+                Activity = autoclass('android.app.Activity')
+
+                if result_code != Activity.RESULT_OK or data is None:
+                    Clock.schedule_once(
+                        lambda dt: self._set_msg("لم يتم التقاط صوت. اضغط الزر وحاول مجدداً.", (1, 0.6, 0.2, 1)),
+                        0
+                    )
+                    return
+
                 RecognizerIntent = autoclass('android.speech.RecognizerIntent')
                 results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 if results and results.size() > 0:
                     val = str(results.get(0)).strip()
                     Clock.schedule_once(lambda dt: self._apply_search(val), 0)
-            except Exception:
-                pass
+                else:
+                    Clock.schedule_once(
+                        lambda dt: self._set_msg("تعذر التعرف على الكلمات المنطوقة.", (1, 0.6, 0.2, 1)),
+                        0
+                    )
 
-        elif request_code == 2002 and data is not None:
-            try:
-                uri = data.getData()
-                if uri is not None:
-                    Clock.schedule_once(lambda dt: self._handle_file_import(uri), 0)
-            except Exception as e:
-                self.result_panel.text = ar(f"خطأ: {e}")
+            elif request_code == 2002:
+                if data is not None:
+                    uri = data.getData()
+                    if uri is not None:
+                        Clock.schedule_once(lambda dt: self._handle_file_import(uri), 0)
 
-        elif request_code == 3003:
-            photo_to_send = self.pending_photo_path if (self.pending_photo_path and os.path.exists(self.pending_photo_path)) else None
-            Clock.schedule_once(lambda dt: self._dispatch_to_whatsapp(self.saved_whatsapp_number, self.pending_report_text, photo_to_send), 0)
+            elif request_code == 3003:
+                photo_to_send = self.pending_photo_path if (self.pending_photo_path and os.path.exists(self.pending_photo_path)) else None
+                Clock.schedule_once(
+                    lambda dt: self._dispatch_to_whatsapp(self.saved_whatsapp_number, self.pending_report_text, photo_to_send),
+                    0
+                )
+
+        except Exception as e:
+            print("Activity Callback Error:", e)
+            Clock.schedule_once(
+                lambda dt: self._set_msg("تم إلغاء العملية أو لم يتم التقاط الصوت.", (0.9, 0.5, 0.2, 1)),
+                0
+            )
+
+    def _set_msg(self, msg, color=(0.8, 0.85, 0.9, 1)):
+        self.result_panel.text = ar(msg)
+        self.result_panel.color = color
 
     def _apply_search(self, text_val):
         self.input_plate.text = text_val
@@ -575,15 +599,15 @@ class AlknasApp(App):
 
     def _done_import(self, cnt, err):
         if err:
-            self.result_panel.text = ar(f"تنبيه:\n{err}")
+            self._set_msg(f"تنبيه:\n{err}", (0.9, 0.4, 0.4, 1))
         else:
-            self.result_panel.text = ar(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {cnt:,} سيارة مقروءة.")
+            self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {cnt:,} سيارة مقروءة.", (0.2, 1.0, 0.5, 1))
             self.lbl_targets.text = ar(f"الأهداف: {self.get_total_records()} | جاهز")
 
     def search_plate(self, query):
         digits_q, letters_q = clean_input(query)
         if not digits_q and not letters_q:
-            self.result_panel.text = ar("يرجى إدخال أو نطق رقم اللوحة أولاً!")
+            self._set_msg("يرجى إدخال أو نطق رقم اللوحة أولاً!", (1, 0.7, 0.2, 1))
             return
 
         conn = sqlite3.connect(self.db_name)
@@ -618,8 +642,7 @@ class AlknasApp(App):
                 f"الشاص: {chassis}\n"
                 f"الجهة: {bank}"
             )
-            self.result_panel.text = ar(res)
-            self.result_panel.color = (0.2, 1.0, 0.5, 1)
+            self._set_msg(res, (0.2, 1.0, 0.5, 1))
 
             self.btn_whatsapp.opacity = 1
             self.btn_whatsapp.disabled = False
@@ -636,8 +659,7 @@ class AlknasApp(App):
         else:
             conn.close()
             self.current_target = None
-            self.result_panel.text = ar(f"اللوحة ({query})\nليست مسجلة ضمن الأهداف المطلوبة.")
-            self.result_panel.color = (0.85, 0.4, 0.4, 1)
+            self._set_msg(f"اللوحة ({query})\nليست مسجلة ضمن الأهداف المطلوبة.", (0.85, 0.4, 0.4, 1))
             self.btn_whatsapp.opacity = 0
             self.btn_whatsapp.disabled = True
 

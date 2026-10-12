@@ -7,7 +7,7 @@ title = Alknas
 package.name = alknas
 
 # (str) Package domain (needed for android packaging)
-package.domain = org.test
+package.domain = org.alknas.app
 
 # (str) Source code where the main.py lives
 source.dir = .
@@ -15,23 +15,41 @@ source.dir = .
 # (list) Source files to include (let empty to include all the files)
 source.include_exts = py,png,jpg,kv,atlas,ttf,csv,xlsx,xls,db
 
-# (str) Application versioning (السطر الذي كان مفقوداً وسبب الخطأ)
-version = 0.1
+# (str) Application versioning
+version = 1.0.0
 
 # (list) Application requirements
-requirements = python3,kivy,arabic-reshaper,python-bidi,pyjnius,openpyxl,xlrd,et_xmlfile
-
-# (list) Permissions
-android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE
-
-# (str) Android queries for Android 11+
-android.manifest.queries = <intent><action android:name="android.speech.RecognitionService" /></intent>
+# ملاحظة: تم الاقتصار على المكتبات المتوافقة تماماً مع python-for-android
+requirements = python3,kivy,arabic-reshaper,python-bidi,pyjnius,xlrd
 
 # (list) Supported orientations
 orientation = portrait
 
-# (list) Android architectures to build for
-android.archs = arm64-v8a, armeabi-v7a
+# (list) Permissions
+android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE
+
+# (str) Queries for Android 11+ Package Visibility
+android.manifest.queries = <intent><action android:name="android.speech.RecognitionService" /></intent>
+
+# (list) Android architectures to build for (معمارية الهواتف الحديثة 64-bit)
+android.archs = arm64-v8a
+
+# (int) Target Android API
+android.api = 33
+
+# (int) Minimum API supported
+android.minapi = 21
+
+# (int) Android NDK version
+android.ndk = 25b
 
 # (bool) Android allow backup
 android.allow_backup = True
+
+[buildozer]
+
+# (int) Log level (0 = error only, 1 = info, 2 = debug with command output)
+log_level = 2
+
+# (int) Display warning if buildozer is run as root (0 = False, 1 = True)
+warn_on_root = 1

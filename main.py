@@ -3,6 +3,8 @@ import csv
 import re
 import sqlite3
 import threading
+import zipfile
+import xml.etree.ElementTree as ET
 from datetime import datetime
 
 from kivy.app import App
@@ -72,7 +74,6 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
-    """معالجة وفك التشفير المزدوج للنصوص العربية"""
     if not text:
         return ""
     t = str(text).strip()
@@ -134,7 +135,6 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
-        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -144,7 +144,6 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
-        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
             text=ar("📂 استيراد ملف (CSV / Excel)"),
@@ -165,7 +164,6 @@ class AlknasApp(App):
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
-        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -175,7 +173,6 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
-        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
@@ -196,7 +193,6 @@ class AlknasApp(App):
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
-        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -413,42 +409,92 @@ class AlknasApp(App):
                 except Exception: pass
             Clock.schedule_once(lambda dt: self._import_done(0, f"تعذر قراءة الملف: {str(e)}"), 0)
 
+    def _parse_xlsx_safely(self, file_path):
+        """قراءة ملفات xlsx عبر محرك XML الداخلي دون استهلاك الرام"""
+        with zipfile.ZipFile(file_path, 'r') as z:
+            shared_strings = []
+            if 'xl/sharedStrings.xml' in z.namelist():
+                tree = ET.fromstring(z.read('xl/sharedStrings.xml'))
+                for elem in tree.findall('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}si'):
+                    text = "".join(t.text for t in elem.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t') if t.text)
+                    shared_strings.append(text)
+
+            sheet_files = [n for n in z.namelist() if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')]
+            if not sheet_files:
+                return
+            target_sheet = sorted(sheet_files)[0]
+
+            sheet_xml = z.read(target_sheet)
+            tree = ET.fromstring(sheet_xml)
+            ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+
+            for row_elem in tree.findall('.//ns:row', ns):
+                current_row = []
+                for cell in row_elem.findall('ns:c', ns):
+                    cell_type = cell.attrib.get('t')
+                    val_elem = cell.find('ns:v', ns)
+                    val = val_elem.text if val_elem is not None else ""
+
+                    if cell_type == 's' and val.isdigit():
+                        idx = int(val)
+                        if idx < len(shared_strings):
+                            val = shared_strings[idx]
+                    current_row.append(clean_cell_value(val))
+
+                if any(current_row):
+                    yield current_row
+
     def _iter_rows(self, file_path):
-        with open(file_path, "rb") as f_check:
-            header = f_check.read(8)
+        """مولد محمي وشامل لكل أنواع الملفات"""
+        try:
+            with open(file_path, "rb") as f_check:
+                header = f_check.read(8)
 
-        # ملفات Excel (xls)
-        if header.startswith(b'\xd0\xcf\x11\xe0'):
-            import xlrd
-            wb = xlrd.open_workbook(file_path)
-            sheet = wb.sheet_by_index(0)
-            for row_idx in range(sheet.nrows):
-                row = sheet.row_values(row_idx)
-                if any(row):
-                    yield [clean_cell_value(c) for c in row]
-            return
+            # ملفات Excel الحديثة (XLSX)
+            if header.startswith(b'PK'):
+                for row in self._parse_xlsx_safely(file_path):
+                    yield row
+                return
 
-        # ملفات CSV النصية
-        encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
-        chosen_enc = 'windows-1256'
-        for enc in encodings:
-            try:
-                with open(file_path, mode='r', encoding=enc) as test_f:
-                    sample = test_f.read(4096)
-                    if any('\u0600' <= ch <= '\u06FF' for ch in sample) and not ('ط' in sample and 'ظ' in sample):
-                        chosen_enc = enc
-                        break
-            except Exception:
-                continue
+            # ملفات Excel القديمة (XLS)
+            if header.startswith(b'\xd0\xcf\x11\xe0'):
+                try:
+                    import xlrd
+                    wb = xlrd.open_workbook(file_path)
+                    sheet = wb.sheet_by_index(0)
+                    for row_idx in range(sheet.nrows):
+                        row = sheet.row_values(row_idx)
+                        if any(row):
+                            yield [clean_cell_value(c) for c in row]
+                    return
+                except Exception as e:
+                    Clock.schedule_once(lambda dt: self._set_msg(f"تعذر فتح ملف XLS: {e}", (1, 0.4, 0.4, 1)), 0)
+                    return
 
-        with open(file_path, mode='r', encoding=chosen_enc, errors='replace') as f:
-            first_line = f.readline()
-            delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
-            f.seek(0)
-            reader = csv.reader(f, delimiter=delimiter)
-            for row in reader:
-                if row:
-                    yield [clean_cell_value(c) for c in row]
+            # ملفات CSV النصية
+            encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
+            chosen_enc = 'windows-1256'
+            for enc in encodings:
+                try:
+                    with open(file_path, mode='r', encoding=enc) as test_f:
+                        sample = test_f.read(4096)
+                        if any('\u0600' <= ch <= '\u06FF' for ch in sample) and not ('ط' in sample and 'ظ' in sample):
+                            chosen_enc = enc
+                            break
+                except Exception:
+                    continue
+
+            with open(file_path, mode='r', encoding=chosen_enc, errors='replace') as f:
+                first_line = f.readline()
+                delimiter = ';' if ';' in first_line else ('\t' if '\t' in first_line else ',')
+                f.seek(0)
+                reader = csv.reader(f, delimiter=delimiter)
+                for row in reader:
+                    if row:
+                        yield [clean_cell_value(c) for c in row]
+
+        except Exception as e:
+            Clock.schedule_once(lambda dt: self._set_msg(f"خطأ أثناء معالجة الملف: {e}", (1, 0.3, 0.3, 1)), 0)
 
     def _import_worker(self, file_path):
         batch = []
@@ -480,7 +526,7 @@ class AlknasApp(App):
                     chassis = ""
                     remaining = []
 
-                    # التعرف التلقائي على رقم الهيكل / الشاص
+                    # فرز رقم الشاص (VIN) تلقائياً
                     for col in other_cols:
                         if not chassis and len(col) >= 10 and re.match(r'^[A-Za-z0-9]+$', col):
                             chassis = col
@@ -574,7 +620,6 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
-            # القالب المنسق والصحيح
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"

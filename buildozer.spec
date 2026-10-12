@@ -24,13 +24,13 @@ requirements = python3,kivy,arabic-reshaper,python-bidi,pyjnius,xlrd
 # (list) Supported orientations
 orientation = portrait
 
-# (list) Permissions
-android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE
+# (list) Permissions (شاملة الكاميرا والموقع الدقيق والاهتزاز والصوت والتخزين)
+android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,CAMERA
 
 # (str) Queries for Android 11+ Package Visibility
 android.manifest.queries = <intent><action android:name="android.speech.RecognitionService" /></intent>
 
-# (list) Android architectures to build for
+# (list) Android architectures to build for (معمارية الهواتف الحديثة 64-bit)
 android.archs = arm64-v8a
 
 # (int) Target Android API

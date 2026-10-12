@@ -72,6 +72,7 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
+    """معالجة وفك التشفير المزدوج للنصوص العربية"""
     if not text:
         return ""
     t = str(text).strip()
@@ -125,6 +126,7 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
+        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -134,6 +136,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
+        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
             text=ar("📂 استيراد ملف (CSV)"),
@@ -154,6 +157,7 @@ class AlknasApp(App):
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
+        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -163,6 +167,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
+        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
@@ -183,6 +188,7 @@ class AlknasApp(App):
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
+        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -295,21 +301,13 @@ class AlknasApp(App):
             intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG")
-            intent.putExtra("android.speech.extra.PREFER_OFFLINE", True)
             intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق رقم اللوحة والحروف...")
 
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-            packageManager = currentActivity.getPackageManager()
-            
-            # فحص دعم النظام للطلب قبل استدعائه منعاً لتجمد الواجهة والخروج المفاجئ
-            activities = packageManager.queryIntentActivities(intent, 0)
-            if activities and activities.size() > 0:
-                currentActivity.startActivityForResult(intent, 1001)
-            else:
-                self._set_msg("خدمة البحث الصوتي غير مفعلة على الهاتف.", (0.9, 0.3, 0.3, 1))
+            currentActivity.startActivityForResult(intent, 1001)
 
         except Exception as e:
-            self._set_msg("تعذر فتح المايك (تأكد من الاتصال بالإنترنت).", (0.9, 0.3, 0.3, 1))
+            self._set_msg("تعذر فتح الميكروفون حالياً.", (0.9, 0.3, 0.3, 1))
 
     def open_system_file_picker(self, instance):
         if platform != 'android':
@@ -331,16 +329,14 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
 
     def on_activity_callback(self, request_code, result_code, data):
-        # معالجة إرجاع البحث الصوتي
         if request_code == 1001:
             try:
                 from jnius import autoclass
                 Activity = autoclass('android.app.Activity')
 
-                # حماية التطبيق عند فشل النت أو الإلغاء
                 if result_code != Activity.RESULT_OK or data is None:
                     Clock.schedule_once(
-                        lambda dt: self._set_msg("لم يتم التقاط الصوت (يتطلب إنترنت في حال عدم توفر الحزمة).", (1, 0.6, 0.2, 1)),
+                        lambda dt: self._set_msg("لم يتم التقاط الصوت (تأكد من الاتصال أو نطق اللوحة بوضوح).", (1, 0.6, 0.2, 1)),
                         0
                     )
                     return
@@ -357,7 +353,6 @@ class AlknasApp(App):
             except Exception:
                 Clock.schedule_once(lambda dt: self._set_msg("خطأ أثناء استلام الصوت.", (0.9, 0.2, 0.2, 1)), 0)
 
-        # معالجة إرجاع الملف المختار
         elif request_code == 2002 and data is not None:
             try:
                 uri = data.getData()
@@ -450,23 +445,25 @@ class AlknasApp(App):
                         digits, letters = extract_tokens(raw_col0)
                         clean = digits + letters
 
-                        col1 = fix_mojibake(str(row[1]).strip()) if len(row) > 1 else ""
-                        col2 = fix_mojibake(str(row[2]).strip()) if len(row) > 2 else ""
-                        col3 = fix_mojibake(str(row[3]).strip()) if len(row) > 3 else ""
+                        other_cols = [fix_mojibake(str(col).strip()) for col in row[1:4]]
+                        while len(other_cols) < 3:
+                            other_cols.append("")
 
-                        # ضبط الحقول: الشاص هو الرقم الهيكلي والموديل هو اسم السيارة
-                        if len(col1) > 10 and re.match(r'^[A-Za-z0-9]+$', col1):
-                            chassis = col1
-                            model = col2
-                            bank = col3
-                        elif len(col2) > 10 and re.match(r'^[A-Za-z0-9]+$', col2):
-                            chassis = col2
-                            model = col1
-                            bank = col3
-                        else:
-                            chassis = col2
-                            model = col1
-                            bank = col3
+                        chassis = ""
+                        remaining = []
+
+                        # كشف رقم الشاص الطويل بغض النظر عن ترتيب العمود
+                        for col in other_cols:
+                            if not chassis and len(col) >= 10 and re.match(r'^[A-Za-z0-9]+$', col):
+                                chassis = col
+                            else:
+                                remaining.append(col)
+
+                        while len(remaining) < 2:
+                            remaining.append("")
+
+                        model = remaining[0]
+                        bank = remaining[1]
 
                         batch.append((clean, digits, letters, raw_col0, chassis, bank, model))
                         count += 1
@@ -549,6 +546,7 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
+            # عرض الحقول بالترتيب الصحيح
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"

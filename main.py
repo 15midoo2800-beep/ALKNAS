@@ -151,7 +151,7 @@ class GlowCard(BoxLayout):
                                  radius=[r + 3 for r in self.radius])
             Color(*self.bg_color)
             RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-            if self.border_color:
+            if self.border_color and self.size[0] > 0 and self.size[1] > 0:
                 Color(*self.border_color)
                 Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius[0]),
                      width=self.line_width)
@@ -178,7 +178,7 @@ class CyberPillButton(Button):
                                  radius=[r + 2 for r in self.radius])
             Color(*self.bg_color)
             RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
-            if self.border_color:
+            if self.border_color and self.size[0] > 0 and self.size[1] > 0:
                 Color(*self.border_color)
                 Line(rounded_rectangle=(self.pos[0], self.pos[1], self.size[0], self.size[1], self.radius[0]),
                      width=1.4)
@@ -197,15 +197,17 @@ class SaudiPlateFrame(BoxLayout):
             RoundedRectangle(pos=self.pos, size=self.size, radius=[24])
             Color(0.04, 0.05, 0.07, 1)
             RoundedRectangle(pos=(self.pos[0] + 5, self.pos[1] + 5),
-                             size=(self.size[0] - 10, self.size[1] - 10), radius=[20])
+                             size=(max(0, self.size[0] - 10), max(0, self.size[1] - 10)), radius=[20])
             Color(0.97, 0.98, 1.0, 1)
             RoundedRectangle(pos=(self.pos[0] + 12, self.pos[1] + 12),
-                             size=(self.size[0] - 24, self.size[1] - 24), radius=[16])
+                             size=(max(0, self.size[0] - 24), max(0, self.size[1] - 24)), radius=[16])
             Color(0.15, 0.15, 0.15, 1)
-            Line(rounded_rectangle=(self.pos[0] + 15, self.pos[1] + 15, self.size[0] - 30, self.size[1] - 30, 14),
-                 width=1.4)
-            Line(points=[self.pos[0] + self.size[0] - 78, self.pos[1] + 15,
-                         self.pos[0] + self.size[0] - 78, self.pos[1] + self.size[1] - 15], width=1.2)
+            if self.size[0] > 30 and self.size[1] > 30:
+                Line(rounded_rectangle=(self.pos[0] + 15, self.pos[1] + 15, max(0, self.size[0] - 30), max(0, self.size[1] - 30), 14),
+                     width=1.4)
+                divider_x = self.pos[0] + max(0, self.size[0] - 78)
+                Line(points=[divider_x, self.pos[1] + 15,
+                             divider_x, self.pos[1] + max(15, self.size[1] - 15)], width=1.2)
 
 class AlknasApp(App):
     def build(self):
@@ -215,7 +217,6 @@ class AlknasApp(App):
         self.saved_whatsapp_number = "966500000000"
         self.pending_photo_path = None
         self.pending_report_text = ""
-        self.init_database()
 
         root = BoxLayout(orientation='vertical', padding=[16, 12], spacing=10)
         with root.canvas.before:
@@ -233,7 +234,7 @@ class AlknasApp(App):
             padding=[8, 4]
         )
         self.lbl_targets = Label(
-            text=ar(f"~ {self.get_total_records()} ~\nأهداف مسجلة"),
+            text=ar("~ جاري التحميل ~\nأهداف مسجلة"),
             font_name=FONT_PATH,
             font_size='11sp',
             bold=True,
@@ -288,7 +289,7 @@ class AlknasApp(App):
         top_actions.add_widget(self.btn_import)
         root.add_widget(top_actions)
 
-        # 3. إطار لوحة السيارة
+        # 3. إطار لوحة السيارة السعودية
         plate_container = SaudiPlateFrame(size_hint=(1, 0.16))
         self.input_plate = TextInput(
             hint_text=ar("١٩٥٥ ح هـ ن"),
@@ -401,8 +402,8 @@ class AlknasApp(App):
         self.result_card.add_widget(self.btn_send_whatsapp)
         root.add_widget(self.result_card)
 
-        if platform == 'android':
-            Clock.schedule_once(lambda dt: self.init_android_features(), 0.5)
+        # تهيئة الخدمات بعد أن تصبح الواجهة جاهزة بالكامل على الشاشة
+        Clock.schedule_once(self._post_init, 0.25)
 
         return root
 
@@ -411,6 +412,25 @@ class AlknasApp(App):
         with instance.canvas.before:
             Color(0.03, 0.04, 0.06, 1)
             RoundedRectangle(pos=instance.pos, size=instance.size)
+
+    def _post_init(self, dt):
+        """تشغيل قاعدة البيانات والخدمات بأمان دون التسبب بإغلاق التطبيق"""
+        try:
+            if platform == 'android':
+                self.db_name = os.path.join(self.user_data_dir, "plates.db")
+            else:
+                self.db_name = "plates.db"
+
+            self.init_database()
+            self.lbl_targets.text = ar(f"~ {self.get_total_records()} ~\nأهداف مسجلة")
+        except Exception as e:
+            print("Post init error:", e)
+
+        if platform == 'android':
+            try:
+                self.init_android_features()
+            except Exception as e:
+                print("Android features init error:", e)
 
     def init_database(self):
         conn = sqlite3.connect(self.db_name)
@@ -571,9 +591,8 @@ class AlknasApp(App):
             self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
 
     def capture_car_photo(self):
-        app_dir = App.get_running_app().user_data_dir
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.pending_photo_path = os.path.join(app_dir, f"car_{timestamp}.jpg")
+        self.pending_photo_path = os.path.join(self.user_data_dir, f"car_{timestamp}.jpg")
 
         if platform == 'android':
             try:
@@ -657,8 +676,7 @@ class AlknasApp(App):
             pfd = contentResolver.openFileDescriptor(uri, "r")
             fd = pfd.getFd()
 
-            app_dir = App.get_running_app().user_data_dir
-            temp_path = os.path.join(app_dir, "imported_data_temp")
+            temp_path = os.path.join(self.user_data_dir, "imported_data_temp")
 
             with open(fd, "rb", closefd=False) as src, open(temp_path, "wb") as dst:
                 while True:

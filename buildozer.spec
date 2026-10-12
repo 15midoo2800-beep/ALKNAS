@@ -1,26 +1,19 @@
 [app]
-title = ALKNAS
+title = Alknas
 package.name = alknas
-package.domain = org.alknas
+package.domain = org.test
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,csv,db,xlsx,ttf
-version = 0.7
+source.include_exts = py,png,jpg,kv,atlas,ttf,csv,xlsx,xls,db
 
-# المكتبات الأساسية مع تضمين openpyxl و pyjnius
-requirements = python3,kivy,arabic-reshaper,python-bidi,openpyxl,pyjnius
+# المتطلبات شاملة دعم إكسيل والنصوص العربية وميزات النظام
+requirements = python3,kivy,arabic-reshaper,python-bidi,pyjnius,openpyxl,xlrd,et_xmlfile
 
-orientation = portrait
-android.permissions = INTERNET,RECORD_AUDIO,VIBRATE,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE
-android.manifest.application_arguments = android:requestLegacyExternalStorage="true"
+# الصلاحيات المطلوبة للميكروفون والذاكرة والاهتزاز
+android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,VIBRATE
 
-android.archs = arm64-v8a
-android.accept_sdk_license = True
+# استعلام خدمات النظام الصوتي لأندرويد 11 فما فوق
+android.manifest.queries = <intent><action android:name="android.speech.RecognitionService" /></intent>
 
-android.api = 33
-android.minapi = 21
-android.ndk = 25b
-android.ndk_api = 21
-
-[buildozer]
-log_level = 2
-warn_on_root = 1
+# المعماريات المستهدفة لهواتف أندرويد الحديثة
+android.archs = arm64-v8a, armeabi-v7a
+android.allow_backup = True

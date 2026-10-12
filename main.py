@@ -72,7 +72,7 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
-    """معالجة فك التشفير المزدوج للنصوص المشوهة"""
+    """معالجة وفك التشفير المزدوج للنصوص العربية"""
     if not text:
         return ""
     t = str(text).strip()
@@ -110,7 +110,6 @@ def clean_arabic_chars(t):
     return t
 
 def clean_cell_value(val):
-    """تنظيف قيم الخلايا من تحويلات إكسيل الرقمية"""
     if val is None:
         return ""
     s = str(val).strip()
@@ -415,24 +414,10 @@ class AlknasApp(App):
             Clock.schedule_once(lambda dt: self._import_done(0, f"تعذر قراءة الملف: {str(e)}"), 0)
 
     def _iter_rows(self, file_path):
-        """مولد محمي لإغلاق الموارد عند قراءة ملفات CSV و XLSX و XLS"""
         with open(file_path, "rb") as f_check:
             header = f_check.read(8)
 
-        # Excel XLSX
-        if header.startswith(b'PK'):
-            from openpyxl import load_workbook
-            wb = load_workbook(filename=file_path, read_only=True, data_only=True)
-            try:
-                sheet = wb.active
-                for row in sheet.iter_rows(values_only=True):
-                    if any(row):
-                        yield [clean_cell_value(c) for c in row]
-            finally:
-                wb.close()
-            return
-
-        # Excel XLS
+        # ملفات Excel (xls)
         if header.startswith(b'\xd0\xcf\x11\xe0'):
             import xlrd
             wb = xlrd.open_workbook(file_path)
@@ -474,7 +459,6 @@ class AlknasApp(App):
         c = conn.cursor()
 
         try:
-            # تسريع عمليات الكتابة الضخمة في SQLite
             c.execute('PRAGMA synchronous = OFF')
             c.execute('PRAGMA journal_mode = MEMORY')
             c.execute('DELETE FROM vehicles')
@@ -483,7 +467,6 @@ class AlknasApp(App):
                 if len(row) >= 1 and str(row[0]).strip():
                     raw_col0 = fix_mojibake(str(row[0]).strip())
 
-                    # تجاوز رؤوس الجداول تلقائياً
                     if any(header_word in raw_col0 for header_word in ['لوحة', 'اللوحة', 'plate', 'Plate']):
                         continue
 
@@ -497,7 +480,7 @@ class AlknasApp(App):
                     chassis = ""
                     remaining = []
 
-                    # التعرف التلقائي على رقم الشاص (VIN)
+                    # التعرف التلقائي على رقم الهيكل / الشاص
                     for col in other_cols:
                         if not chassis and len(col) >= 10 and re.match(r'^[A-Za-z0-9]+$', col):
                             chassis = col
@@ -591,6 +574,7 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
+            # القالب المنسق والصحيح
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"

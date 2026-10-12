@@ -6,14 +6,17 @@ import threading
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
+import urllib.parse
 
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.graphics import Color, RoundedRectangle, Line
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
+from kivy.uix.checkbox import CheckBox
 from kivy.uix.popup import Popup
 from kivy.utils import platform
 
@@ -128,7 +131,6 @@ def extract_tokens(text):
     letters = "".join(re.findall(r'[\u0600-\u06FFa-zA-Z]+', t))
     return digits, letters
 
-# عناصر مخصصة بالكامل بتقنية الرسم المباشر (Canvas)
 class GlowCard(BoxLayout):
     def __init__(self, bg_color=(0.04, 0.07, 0.09, 0.95), border_color=(0, 0.9, 0.45, 1),
                  radius=[22], line_width=1.8, **kwargs):
@@ -182,7 +184,6 @@ class CyberPillButton(Button):
                      width=1.4)
 
 class SaudiPlateFrame(BoxLayout):
-    """إطار لوحة المركبة السعودية الواقعية"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.orientation = 'horizontal'
@@ -210,18 +211,20 @@ class AlknasApp(App):
     def build(self):
         self.db_name = "plates.db"
         self.tts = None
+        self.current_target = None
+        self.saved_whatsapp_number = "966500000000"
+        self.pending_photo_path = None
+        self.pending_report_text = ""
         self.init_database()
 
         root = BoxLayout(orientation='vertical', padding=[16, 12], spacing=10)
         with root.canvas.before:
-            Color(0.03, 0.04, 0.06, 1)  # خلفية سوداء هادئة
+            Color(0.03, 0.04, 0.06, 1)
             RoundedRectangle(pos=root.pos, size=root.size)
         root.bind(pos=self._update_bg, size=self._update_bg)
 
-        # 1. شريط العنوان والهدف النشط العلوي
+        # 1. شريط العنوان
         header = BoxLayout(orientation='horizontal', size_hint=(1, 0.09), spacing=8)
-        
-        # كبسولة عداد السيارات المسجلة (النيون الأخضر)
         self.badge_box = GlowCard(
             bg_color=(0.04, 0.14, 0.09, 0.9),
             border_color=(0.1, 0.9, 0.45, 1),
@@ -242,7 +245,6 @@ class AlknasApp(App):
         self.badge_box.add_widget(self.lbl_targets)
         header.add_widget(self.badge_box)
 
-        # شعار القناص البصري
         self.lbl_app_title = Label(
             text=ar("القناص 🎯"),
             font_name=FONT_PATH,
@@ -257,9 +259,8 @@ class AlknasApp(App):
         header.add_widget(self.lbl_app_title)
         root.add_widget(header)
 
-        # 2. أزرار التحكم الثانوية (استيراد وسجل)
+        # 2. أزرار التحكم
         top_actions = BoxLayout(orientation='horizontal', spacing=10, size_hint=(1, 0.075))
-        
         self.btn_history = CyberPillButton(
             text=ar("📋 سجل الأهداف"),
             font_name=FONT_PATH,
@@ -287,10 +288,8 @@ class AlknasApp(App):
         top_actions.add_widget(self.btn_import)
         root.add_widget(top_actions)
 
-        # 3. إطار لوحة السيارة السعودية للإدخال
+        # 3. إطار لوحة السيارة
         plate_container = SaudiPlateFrame(size_hint=(1, 0.16))
-        
-        # حقل الإدخال داخل اللوحة
         self.input_plate = TextInput(
             hint_text=ar("١٩٥٥ ح هـ ن"),
             font_name=FONT_PATH,
@@ -305,7 +304,6 @@ class AlknasApp(App):
         )
         plate_container.add_widget(self.input_plate)
 
-        # الرمز الجانبي للوحة (السيفين والنخلة KSA)
         ksa_side = Label(
             text="🇸🇦\nKSA",
             font_name=FONT_PATH,
@@ -320,9 +318,8 @@ class AlknasApp(App):
         plate_container.add_widget(ksa_side)
         root.add_widget(plate_container)
 
-        # 4. أزرار الفحص المتوهجة (أزرق وأحمر نيون)
+        # 4. أزرار الفحص
         action_row = BoxLayout(orientation='horizontal', spacing=12, size_hint=(1, 0.09))
-        
         self.btn_voice = CyberPillButton(
             text=ar("🎙️ فحص بالصوت"),
             font_name=FONT_PATH,
@@ -350,45 +347,58 @@ class AlknasApp(App):
         action_row.add_widget(self.btn_search)
         root.add_widget(action_row)
 
-        # 5. بطاقة النتيجة HUD التكتيكية المضيئة
+        # 5. بطاقة النتيجة
         self.result_card = GlowCard(
             bg_color=(0.03, 0.07, 0.08, 0.95),
             border_color=(0.0, 0.95, 0.45, 1),
             radius=[24],
             line_width=2.0,
             orientation='vertical',
-            padding=[16, 12],
-            spacing=8,
+            padding=[16, 10],
+            spacing=6,
             size_hint=(1, 0.48)
         )
-        
-        # شارة رأس بطاقة النتيجة
         self.badge_status = Label(
             text=ar("⚡ نتائج الفحص النشط ⚡"),
             font_name=FONT_PATH,
             font_size='13sp',
             bold=True,
             color=(0.3, 1.0, 0.6, 1),
-            size_hint=(1, 0.16),
+            size_hint=(1, 0.14),
             halign='center',
             valign='middle'
         )
         self.badge_status.bind(size=self.badge_status.setter('text_size'))
         self.result_card.add_widget(self.badge_status)
 
-        # جسم النتيجة وعرض البيانات
         self.result_panel = Label(
             text=ar("رادار القناص نشط ومستعد.\n\nانطق رقم اللوحة أو اكتبه للفحص التلقائي."),
             font_name=FONT_PATH,
-            font_size='16sp',
+            font_size='15sp',
             halign='center',
             valign='middle',
             color=(0.7, 0.85, 0.8, 1),
-            line_height=1.4,
-            size_hint=(1, 0.84)
+            line_height=1.35,
+            size_hint=(1, 0.68)
         )
         self.result_panel.bind(size=self.result_panel.setter('text_size'))
         self.result_card.add_widget(self.result_panel)
+
+        self.btn_send_whatsapp = CyberPillButton(
+            text=ar("🚀 إرسال الموقع والبيانات للواتساب"),
+            font_name=FONT_PATH,
+            font_size='14sp',
+            bold=True,
+            bg_color=(0.05, 0.35, 0.15, 0.9),
+            border_color=(0.1, 0.95, 0.45, 1),
+            glow_color=(0.1, 0.8, 0.3, 0.3),
+            color=(1, 1, 1, 1),
+            size_hint=(1, 0.18)
+        )
+        self.btn_send_whatsapp.bind(on_press=self.open_whatsapp_dispatch_dialog)
+        self.btn_send_whatsapp.opacity = 0
+        self.btn_send_whatsapp.disabled = True
+        self.result_card.add_widget(self.btn_send_whatsapp)
         root.add_widget(self.result_card)
 
         if platform == 'android':
@@ -429,6 +439,18 @@ class AlknasApp(App):
                 created_at TEXT
             )
         ''')
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        c.execute('SELECT value FROM settings WHERE key="wa_number"')
+        row = c.fetchone()
+        if row:
+            self.saved_whatsapp_number = row[0]
+        else:
+            c.execute('INSERT INTO settings VALUES ("wa_number", "966500000000")')
         conn.commit()
         conn.close()
 
@@ -450,7 +472,10 @@ class AlknasApp(App):
                 Permission.RECORD_AUDIO,
                 Permission.READ_EXTERNAL_STORAGE,
                 Permission.WRITE_EXTERNAL_STORAGE,
-                Permission.VIBRATE
+                Permission.VIBRATE,
+                Permission.ACCESS_FINE_LOCATION,
+                Permission.ACCESS_COARSE_LOCATION,
+                Permission.CAMERA
             ])
             from jnius import autoclass
             from android import activity
@@ -461,6 +486,27 @@ class AlknasApp(App):
             self.tts = TextToSpeech(PythonActivity.mActivity, None)
         except Exception as e:
             print("Android init error:", e)
+
+    def get_current_location(self):
+        if platform != 'android':
+            return 24.7136, 46.6753
+
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Context = autoclass('android.content.Context')
+            activity = PythonActivity.mActivity
+            loc_service = activity.getSystemService(Context.LOCATION_SERVICE)
+
+            loc = loc_service.getLastKnownLocation('gps')
+            if not loc:
+                loc = loc_service.getLastKnownLocation('network')
+
+            if loc:
+                return loc.getLatitude(), loc.getLongitude()
+        except Exception as e:
+            print("Location error:", e)
+        return None, None
 
     def trigger_alert(self, text_alert):
         if platform == 'android':
@@ -524,6 +570,33 @@ class AlknasApp(App):
         except Exception as e:
             self.result_panel.text = ar(f"تعذر فتح مدير الملفات: {str(e)}")
 
+    def capture_car_photo(self):
+        app_dir = App.get_running_app().user_data_dir
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.pending_photo_path = os.path.join(app_dir, f"car_{timestamp}.jpg")
+
+        if platform == 'android':
+            try:
+                from jnius import autoclass, cast
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Intent = autoclass('android.content.Intent')
+                MediaStore = autoclass('android.provider.MediaStore')
+                File = autoclass('java.io.File')
+                Uri = autoclass('android.net.Uri')
+
+                intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+                photo_file = File(self.pending_photo_path)
+                file_uri = Uri.fromFile(photo_file)
+                intent.putExtra(MediaStore.EXTRA_OUTPUT, file_uri)
+
+                currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+                currentActivity.startActivityForResult(intent, 3003)
+                return
+            except Exception as e:
+                print("Camera launch error:", e)
+
+        self._dispatch_to_whatsapp(self.saved_whatsapp_number, self.pending_report_text, None)
+
     def on_activity_callback(self, request_code, result_code, data):
         if request_code == 1001:
             try:
@@ -556,6 +629,10 @@ class AlknasApp(App):
                     Clock.schedule_once(lambda dt: self._handle_selected_uri(uri), 0)
             except Exception as e:
                 Clock.schedule_once(lambda dt: self._set_msg(f"خطأ بالملف: {e}", (0.9, 0.2, 0.2, 1)), 0)
+
+        elif request_code == 3003:
+            photo_to_send = self.pending_photo_path if (self.pending_photo_path and os.path.exists(self.pending_photo_path)) else None
+            Clock.schedule_once(lambda dt: self._dispatch_to_whatsapp(self.saved_whatsapp_number, self.pending_report_text, photo_to_send), 0)
 
     def _apply_voice_search(self, parsed_text):
         self.input_plate.text = parsed_text
@@ -832,7 +909,14 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
-            # عرض تفاصيل الهدف بنمط HUD العسكري المعروض بالصورة
+            self.current_target = {
+                "plate": plate_val,
+                "model": model,
+                "chassis": chassis,
+                "bank": bank,
+                "time": now_str
+            }
+
             res_text = (
                 f"🚨 اللوحة:  {plate_val}\n\n"
                 f"🚗 الموديل:  {model}\n\n"
@@ -842,13 +926,149 @@ class AlknasApp(App):
             self._set_msg(res_text, (0.2, 1.0, 0.5, 1))
             self.badge_status.text = ar("🚨 تم رصد هدف مطلوب في النظام! 🚨")
             self.badge_status.color = (1.0, 0.25, 0.3, 1)
+            
+            self.btn_send_whatsapp.opacity = 1
+            self.btn_send_whatsapp.disabled = False
+            
             self.trigger_alert(f"هدف مطلوب! {model}")
         else:
             conn.close()
+            self.current_target = None
             display_val = f"{digits_q} {letters_q}".strip()
             self._set_msg(f"اللوحة ({display_val})\nليست مسجلة ضمن الأهداف المطلوبة.", (0.85, 0.4, 0.4, 1))
             self.badge_status.text = ar("⚡ نتائج الفحص النشط ⚡")
             self.badge_status.color = (0.3, 1.0, 0.6, 1)
+            self.btn_send_whatsapp.opacity = 0
+            self.btn_send_whatsapp.disabled = True
+
+    def open_whatsapp_dispatch_dialog(self, instance):
+        if not self.current_target:
+            return
+
+        box = BoxLayout(orientation='vertical', padding=12, spacing=10)
+
+        box.add_widget(Label(text=ar("رقم الواتساب المستلم (مع كود الدولة):"), font_name=FONT_PATH, font_size='13sp', size_hint=(1, 0.12)))
+        input_phone = TextInput(
+            text=self.saved_whatsapp_number,
+            font_name=FONT_PATH,
+            multiline=False,
+            font_size='15sp',
+            size_hint=(1, 0.15),
+            halign='center'
+        )
+        box.add_widget(input_phone)
+
+        box.add_widget(Label(text=ar("تخصيص البيانات المرسلة:"), font_name=FONT_PATH, font_size='13sp', size_hint=(1, 0.12)))
+        
+        checks_grid = GridLayout(cols=2, spacing=6, size_hint=(1, 0.4))
+        
+        cb_plate = CheckBox(active=True, size_hint=(0.2, 1))
+        lbl_plate = Label(text=ar("بيانات اللوحة والسيارة"), font_name=FONT_PATH, font_size='12sp', size_hint=(0.8, 1))
+        checks_grid.add_widget(lbl_plate)
+        checks_grid.add_widget(cb_plate)
+
+        cb_loc = CheckBox(active=True, size_hint=(0.2, 1))
+        lbl_loc = Label(text=ar("الموقع الجغرافي (GPS خرائط)"), font_name=FONT_PATH, font_size='12sp', size_hint=(0.8, 1))
+        checks_grid.add_widget(lbl_loc)
+        checks_grid.add_widget(cb_loc)
+
+        cb_camera = CheckBox(active=False, size_hint=(0.2, 1))
+        lbl_camera = Label(text=ar("📸 فتح الكاميرا وتصوير السيارة"), font_name=FONT_PATH, font_size='12sp', size_hint=(0.8, 1))
+        checks_grid.add_widget(lbl_camera)
+        checks_grid.add_widget(cb_camera)
+
+        box.add_widget(checks_grid)
+
+        btn_confirm = CyberPillButton(
+            text=ar("🚀 تنفيذ وإرسال"),
+            font_name=FONT_PATH,
+            font_size='14sp',
+            bold=True,
+            bg_color=(0.1, 0.65, 0.35, 1),
+            size_hint=(1, 0.2)
+        )
+        box.add_widget(btn_confirm)
+
+        dialog = Popup(
+            title=ar("تخصيص إرسال الهدف"),
+            title_font=FONT_PATH,
+            content=box,
+            size_hint=(0.92, 0.75),
+            background_color=(0.04, 0.06, 0.09, 0.96)
+        )
+
+        def do_send(x):
+            phone = input_phone.text.strip().replace("+", "")
+            self.saved_whatsapp_number = phone
+            
+            conn = sqlite3.connect(self.db_name)
+            c = conn.cursor()
+            c.execute('INSERT OR REPLACE INTO settings (key, value) VALUES ("wa_number", ?)', (phone,))
+            conn.commit()
+            conn.close()
+
+            report_lines = ["🚨 *تقرير رصد ميداني - تطبيق القناص* 🚨", "━━━━━━━━━━━━━━━━━"]
+            if cb_plate.active:
+                report_lines.append(f"📌 *اللوحة:* {self.current_target['plate']}")
+                report_lines.append(f"🚗 *الموديل:* {self.current_target['model']}")
+                report_lines.append(f"🆔 *الشاص:* {self.current_target['chassis']}")
+                report_lines.append(f"🏢 *الجهة:* {self.current_target['bank']}")
+                report_lines.append(f"🕒 *الوقت:* {self.current_target['time']}")
+
+            if cb_loc.active:
+                lat, lon = self.get_current_location()
+                if lat and lon:
+                    map_url = f"https://maps.google.com/?q={lat},{lon}"
+                    report_lines.append("━━━━━━━━━━━━━━━━━")
+                    report_lines.append(f"📍 *الموقع الميداني (خرائط جوجل):*\n{map_url}")
+                else:
+                    report_lines.append("\n⚠️ يتعذر جلب إحداثيات GPS حالياً")
+
+            self.pending_report_text = "\n".join(report_lines)
+            dialog.dismiss()
+
+            if cb_camera.active:
+                self.capture_car_photo()
+            else:
+                self._dispatch_to_whatsapp(phone, self.pending_report_text, None)
+
+        btn_confirm.bind(on_press=do_send)
+        dialog.open()
+
+    def _dispatch_to_whatsapp(self, phone, text_msg, image_path=None):
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                Intent = autoclass('android.content.Intent')
+                Uri = autoclass('android.net.Uri')
+                File = autoclass('java.io.File')
+
+                if image_path and os.path.exists(image_path):
+                    intent = Intent(Intent.ACTION_SEND)
+                    intent.setType("image/jpeg")
+                    intent.setPackage("com.whatsapp")
+                    
+                    file_uri = Uri.fromFile(File(image_path))
+                    intent.putExtra(Intent.EXTRA_STREAM, file_uri)
+                    intent.putExtra(Intent.EXTRA_TEXT, text_msg)
+                    intent.putExtra("jid", f"{phone}@s.whatsapp.net")
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                else:
+                    encoded_text = urllib.parse.quote(text_msg)
+                    wa_url = f"https://api.whatsapp.com/send?phone={phone}&text={encoded_text}"
+                    intent = Intent(Intent.ACTION_VIEW)
+                    intent.setData(Uri.parse(wa_url))
+
+                PythonActivity.mActivity.startActivity(intent)
+                return
+            except Exception as e:
+                print("WhatsApp dispatch error:", e)
+
+        encoded_text = urllib.parse.quote(text_msg)
+        wa_url = f"https://api.whatsapp.com/send?phone={phone}&text={encoded_text}"
+        import webbrowser
+        webbrowser.open(wa_url)
 
     def show_hit_history(self, instance):
         conn = sqlite3.connect(self.db_name)
@@ -869,7 +1089,7 @@ class AlknasApp(App):
         popup_layout.add_widget(lbl)
 
         btn_close = CyberPillButton(text=ar("إغلاق السجل"), font_name=FONT_PATH, size_hint=(1, 0.18),
-                                    bg_color=(0.1, 0.15, 0.22, 1), border_color=(0.3, 0.5, 0.7, 1))
+                                  bg_color=(0.1, 0.15, 0.22, 1), border_color=(0.3, 0.5, 0.7, 1))
         popup_layout.add_widget(btn_close)
 
         pop = Popup(

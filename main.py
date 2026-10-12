@@ -72,6 +72,7 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
+    """معالجة فك التشفير المزدوج للنصوص المشوهة"""
     if not text:
         return ""
     t = str(text).strip()
@@ -108,6 +109,15 @@ def clean_arabic_chars(t):
     t = re.sub(r'ى', 'ي', t)
     return t
 
+def clean_cell_value(val):
+    """تنظيف قيم الخلايا من تحويلات إكسيل الرقمية"""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if s.endswith(".0"):
+        s = s[:-2]
+    return s
+
 def extract_tokens(text):
     if not text:
         return "", ""
@@ -125,6 +135,7 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
+        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -134,6 +145,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
+        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
             text=ar("📂 استيراد ملف (CSV / Excel)"),
@@ -154,6 +166,7 @@ class AlknasApp(App):
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
+        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -163,6 +176,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
+        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
@@ -183,6 +197,7 @@ class AlknasApp(App):
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
+        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -300,7 +315,7 @@ class AlknasApp(App):
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
             currentActivity.startActivityForResult(intent, 1001)
 
-        except Exception as e:
+        except Exception:
             self._set_msg("تعذر فتح الميكروفون حالياً.", (0.9, 0.3, 0.3, 1))
 
     def open_system_file_picker(self, instance):
@@ -400,22 +415,24 @@ class AlknasApp(App):
             Clock.schedule_once(lambda dt: self._import_done(0, f"تعذر قراءة الملف: {str(e)}"), 0)
 
     def _iter_rows(self, file_path):
-        """مولد موحد لقراءة الأسطر سواء كان الملف CSV أو XLSX أو XLS"""
+        """مولد محمي لإغلاق الموارد عند قراءة ملفات CSV و XLSX و XLS"""
         with open(file_path, "rb") as f_check:
             header = f_check.read(8)
 
-        # ملف Excel حديث (XLSX - Zip Container)
+        # Excel XLSX
         if header.startswith(b'PK'):
             from openpyxl import load_workbook
             wb = load_workbook(filename=file_path, read_only=True, data_only=True)
-            sheet = wb.active
-            for row in sheet.iter_rows(values_only=True):
-                if any(row):
-                    yield [str(c) if c is not None else "" for c in row]
-            wb.close()
+            try:
+                sheet = wb.active
+                for row in sheet.iter_rows(values_only=True):
+                    if any(row):
+                        yield [clean_cell_value(c) for c in row]
+            finally:
+                wb.close()
             return
 
-        # ملف Excel قديم (XLS - Compound File Binary)
+        # Excel XLS
         if header.startswith(b'\xd0\xcf\x11\xe0'):
             import xlrd
             wb = xlrd.open_workbook(file_path)
@@ -423,10 +440,10 @@ class AlknasApp(App):
             for row_idx in range(sheet.nrows):
                 row = sheet.row_values(row_idx)
                 if any(row):
-                    yield [str(c) if c is not None else "" for c in row]
+                    yield [clean_cell_value(c) for c in row]
             return
 
-        # ملف نصي عادي (CSV)
+        # ملفات CSV النصية
         encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
         chosen_enc = 'windows-1256'
         for enc in encodings:
@@ -446,7 +463,7 @@ class AlknasApp(App):
             reader = csv.reader(f, delimiter=delimiter)
             for row in reader:
                 if row:
-                    yield row
+                    yield [clean_cell_value(c) for c in row]
 
     def _import_worker(self, file_path):
         batch = []
@@ -457,13 +474,16 @@ class AlknasApp(App):
         c = conn.cursor()
 
         try:
+            # تسريع عمليات الكتابة الضخمة في SQLite
+            c.execute('PRAGMA synchronous = OFF')
+            c.execute('PRAGMA journal_mode = MEMORY')
             c.execute('DELETE FROM vehicles')
 
             for row in self._iter_rows(file_path):
                 if len(row) >= 1 and str(row[0]).strip():
                     raw_col0 = fix_mojibake(str(row[0]).strip())
-                    
-                    # تخطي صف العنوان إن وُجد
+
+                    # تجاوز رؤوس الجداول تلقائياً
                     if any(header_word in raw_col0 for header_word in ['لوحة', 'اللوحة', 'plate', 'Plate']):
                         continue
 
@@ -477,13 +497,12 @@ class AlknasApp(App):
                     chassis = ""
                     remaining = []
 
-                    # فرز رقم الشاص الطويل (VIN) تلقائياً
+                    # التعرف التلقائي على رقم الشاص (VIN)
                     for col in other_cols:
-                        clean_col = col.replace(".0", "") if col.endswith(".0") else col
-                        if not chassis and len(clean_col) >= 10 and re.match(r'^[A-Za-z0-9]+$', clean_col):
-                            chassis = clean_col
+                        if not chassis and len(col) >= 10 and re.match(r'^[A-Za-z0-9]+$', col):
+                            chassis = col
                         else:
-                            remaining.append(clean_col)
+                            remaining.append(col)
 
                     while len(remaining) < 2:
                         remaining.append("")

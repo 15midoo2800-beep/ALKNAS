@@ -19,7 +19,6 @@ source.include_exts = py,png,jpg,kv,atlas,ttf,csv,xlsx,xls,db
 version = 1.0.0
 
 # (list) Application requirements
-# ملاحظة: تم الاقتصار على المكتبات المتوافقة تماماً مع python-for-android
 requirements = python3,kivy,arabic-reshaper,python-bidi,pyjnius,xlrd
 
 # (list) Supported orientations
@@ -31,7 +30,7 @@ android.permissions = RECORD_AUDIO,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,
 # (str) Queries for Android 11+ Package Visibility
 android.manifest.queries = <intent><action android:name="android.speech.RecognitionService" /></intent>
 
-# (list) Android architectures to build for (معمارية الهواتف الحديثة 64-bit)
+# (list) Android architectures to build for
 android.archs = arm64-v8a
 
 # (int) Target Android API
@@ -40,8 +39,14 @@ android.api = 33
 # (int) Minimum API supported
 android.minapi = 21
 
-# (int) Android NDK version
+# (str) Android NDK version
 android.ndk = 25b
+
+# (str) Android Build-Tools version
+android.build_tools_version = 33.0.2
+
+# (bool) Android auto-accept SDK license
+android.accept_sdk_license = True
 
 # (bool) Android allow backup
 android.allow_backup = True

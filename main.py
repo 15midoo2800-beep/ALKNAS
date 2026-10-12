@@ -72,27 +72,23 @@ LETTER_REPLACEMENTS = [
 ]
 
 def fix_mojibake(text):
-    """إصلاح وتصحيح النصوص المزدوجة الترميز (windows-1256 / utf-8) تلقائياً"""
+    """فك ومعالجة التشفير المزدوج للنصوص العربية المشوهة"""
     if not text:
         return ""
     t = str(text).strip()
-    # إذا كان النص يحتوي على نمط الحروف المشوهة (ط و ظ)
-    if 'ط' in t and ('ظ' in t or '¹' in t or '§' in t or '€' in t or '' in t):
-        try:
-            # إعادة التشفير إلى بايتات وفكها بالترميز الصحيح
-            raw_bytes = t.encode('windows-1252', errors='ignore')
-            fixed = raw_bytes.decode('utf-8', errors='ignore')
-            if fixed and any('\u0600' <= ch <= '\u06FF' for ch in fixed):
-                return fixed
-        except Exception:
-            pass
-        try:
-            raw_bytes = t.encode('utf-8', errors='ignore')
-            fixed = raw_bytes.decode('windows-1256', errors='ignore')
-            if fixed and any('\u0600' <= ch <= '\u06FF' for ch in fixed):
-                return fixed
-        except Exception:
-            pass
+    if any(c in t for c in ['ط', 'ظ', '¹', '§', '€', '±', 'ـ', '³']):
+        for src_enc, dst_enc in [
+            ('windows-1252', 'utf-8'),
+            ('cp1256', 'utf-8'),
+            ('latin1', 'utf-8'),
+            ('utf-8', 'windows-1256')
+        ]:
+            try:
+                fixed = t.encode(src_enc, errors='ignore').decode(dst_enc, errors='ignore')
+                if any('\u0600' <= ch <= '\u06FF' for ch in fixed) and not any(bad in fixed for bad in ['ط±', 'ط¹', 'ط§', 'ط·', 'ظ']):
+                    return fixed
+            except Exception:
+                continue
     return t
 
 def clean_speech_input(text):
@@ -130,6 +126,7 @@ class AlknasApp(App):
 
         root = BoxLayout(orientation='vertical', padding=12, spacing=8)
 
+        # شريط الحالة العلوي
         self.stats_bar = Label(
             text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
             font_name=FONT_PATH,
@@ -139,6 +136,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.stats_bar)
 
+        # أزرار الاستيراد وسجل الأهداف
         top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
         self.btn_import = Button(
             text=ar("📂 استيراد ملف (CSV)"),
@@ -159,6 +157,7 @@ class AlknasApp(App):
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
+        # حقل الإدخال
         self.input_plate = TextInput(
             hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
             font_name=FONT_PATH,
@@ -168,6 +167,7 @@ class AlknasApp(App):
         )
         root.add_widget(self.input_plate)
 
+        # أزرار الفحص
         action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
         self.btn_search = Button(
             text=ar("🔍 فحص اللوحة"),
@@ -188,6 +188,7 @@ class AlknasApp(App):
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
+        # شاشة عرض النتائج
         self.result_panel = Label(
             text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
             font_name=FONT_PATH,
@@ -299,7 +300,8 @@ class AlknasApp(App):
 
             intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-SA")
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ar-EG")
+            intent.putExtra("android.speech.extra.PREFER_OFFLINE", True)
             intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "انطق رقم اللوحة والحروف...")
 
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
@@ -396,11 +398,17 @@ class AlknasApp(App):
         batch_size = 5000
         count = 0
 
+        # صمام أمان لمنع حشو بايتات ملفات الإكسيل المضغوطة
+        with open(file_path, "rb") as f_check:
+            header = f_check.read(4)
+        if header.startswith(b'PK'):
+            Clock.schedule_once(lambda dt: self._import_done(0, "الملف المختار هو ملف إكسيل مضغوط!\nيرجى حفظه بصيغة (CSV UTF-8) ثم اختياره."), 0)
+            return
+
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
 
         try:
-            # اختبار الترميز المباشر الأكثر ملائمة للجداول العربية
             encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
             chosen_enc = 'windows-1256'
 
@@ -408,7 +416,6 @@ class AlknasApp(App):
                 try:
                     with open(file_path, mode='r', encoding=enc) as test_f:
                         sample = test_f.read(4096)
-                        # إذا ظهرت حروف عربية نقية بدون طلاسم
                         if any('\u0600' <= ch <= '\u06FF' for ch in sample) and not ('ط' in sample and 'ظ' in sample):
                             chosen_enc = enc
                             break
@@ -426,13 +433,12 @@ class AlknasApp(App):
                         raw_col0 = fix_mojibake(str(row[0]).strip())
                         digits, letters = extract_tokens(raw_col0)
                         clean = digits + letters
-                        
+
                         col1 = fix_mojibake(str(row[1]).strip()) if len(row) > 1 else ""
                         col2 = fix_mojibake(str(row[2]).strip()) if len(row) > 2 else ""
                         col3 = fix_mojibake(str(row[3]).strip()) if len(row) > 3 else ""
 
-                        # تحديد الموديل والشاص والبنك تلقائياً بحسب المحتوى
-                        # الشاص عادة يكون إنجليزي ورقمي طويل (أكثر من 10 خانات)
+                        # تحديد الحقول تلقائياً: الشاص (رمز الهيكل الطويل) والموديل (اسم السيارة)
                         if len(col1) > 10 and re.match(r'^[A-Za-z0-9]+$', col1):
                             chassis = col1
                             model = col2
@@ -442,9 +448,9 @@ class AlknasApp(App):
                             model = col1
                             bank = col3
                         else:
-                            chassis = col1
-                            bank = col2
-                            model = col3
+                            chassis = col2
+                            model = col1
+                            bank = col3
 
                         batch.append((clean, digits, letters, raw_col0, chassis, bank, model))
                         count += 1
@@ -527,6 +533,7 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
+            # قالب العرض المضبوط
             res_text = (
                 f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
                 f"اللوحة: {plate_val}\n"

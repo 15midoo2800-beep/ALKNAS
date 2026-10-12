@@ -35,8 +35,16 @@ jobs:
           pip install --upgrade pip
           pip install Cython==0.29.36 buildozer
 
+      - name: Pre-accept Android Licenses and Setup Tools
+        run: |
+          mkdir -p ~/.android
+          touch ~/.android/repositories.cfg
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.2" "platforms;android-33"
+
       - name: Build with Buildozer
-        run: buildozer -v android debug
+        run: |
+          yes | buildozer -v android debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

@@ -9,6 +9,7 @@ from datetime import datetime
 
 from kivy.app import App
 from kivy.clock import Clock
+from kivy.graphics import Color, RoundedRectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.textinput import TextInput
@@ -127,88 +128,164 @@ def extract_tokens(text):
     letters = "".join(re.findall(r'[\u0600-\u06FFa-zA-Z]+', t))
     return digits, letters
 
+# مكونات الواجهة المخصصة بحواف منحنية وتصميم عصري
+class RoundedButton(Button):
+    def __init__(self, bg_color=(0.2, 0.45, 0.85, 1), radius=[14], **kwargs):
+        super().__init__(**kwargs)
+        self.background_color = (0, 0, 0, 0)
+        self.background_normal = ''
+        self.bg_color = bg_color
+        self.radius = radius
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+    def _update_canvas(self, *args):
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*self.bg_color)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
+
+class RoundedCard(BoxLayout):
+    def __init__(self, bg_color=(0.12, 0.15, 0.22, 1), radius=[16], **kwargs):
+        super().__init__(**kwargs)
+        self.bg_color = bg_color
+        self.radius = radius
+        self.bind(pos=self._update_canvas, size=self._update_canvas)
+
+    def _update_canvas(self, *args):
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*self.bg_color)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=self.radius)
+
 class AlknasApp(App):
     def build(self):
         self.db_name = "plates.db"
         self.tts = None
         self.init_database()
 
-        root = BoxLayout(orientation='vertical', padding=12, spacing=8)
+        # حاوية التطبيق الأساسية بخلفية داكنة راقية
+        root = BoxLayout(orientation='vertical', padding=14, spacing=10)
+        with root.canvas.before:
+            Color(0.07, 0.09, 0.13, 1)  # رمادي/كحلي ليلي فخم
+            RoundedRectangle(pos=root.pos, size=root.size)
+        root.bind(pos=lambda obj, val: self._update_root_bg(root), size=lambda obj, val: self._update_root_bg(root))
+
+        # 1. شريط التطبيق العلوي (AppBar Card)
+        header_card = RoundedCard(bg_color=(0.11, 0.14, 0.20, 1), radius=[14], orientation='horizontal',
+                                  padding=[12, 6], size_hint=(1, 0.08))
+        self.title_lbl = Label(
+            text=ar("🎯 القناص | ALKNAS"),
+            font_name=FONT_PATH,
+            font_size='16sp',
+            bold=True,
+            color=(0.95, 0.95, 0.98, 1),
+            halign='left',
+            size_hint=(0.45, 1)
+        )
+        self.title_lbl.bind(size=self.title_lbl.setter('text_size'))
+        header_card.add_widget(self.title_lbl)
 
         self.stats_bar = Label(
-            text=ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: جاهز"),
+            text=ar(f"الأهداف: {self.get_total_records()} | جاهز"),
             font_name=FONT_PATH,
-            font_size='13sp',
-            size_hint=(1, 0.05),
-            color=(0.7, 0.8, 0.9, 1)
+            font_size='12sp',
+            color=(0.4, 0.85, 0.65, 1),
+            halign='right',
+            size_hint=(0.55, 1)
         )
-        root.add_widget(self.stats_bar)
+        self.stats_bar.bind(size=self.stats_bar.setter('text_size'))
+        header_card.add_widget(self.stats_bar)
+        root.add_widget(header_card)
 
-        top_ctrl = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.08))
-        self.btn_import = Button(
+        # 2. أزرار إدارة البيانات وسجل العمليات
+        top_ctrl = BoxLayout(orientation='horizontal', spacing=10, size_hint=(1, 0.08))
+        self.btn_import = RoundedButton(
             text=ar("📂 استيراد ملف (CSV / Excel)"),
             font_name=FONT_PATH,
-            font_size='14sp',
-            background_color=(0.15, 0.45, 0.35, 1)
+            font_size='13sp',
+            bold=True,
+            bg_color=(0.12, 0.38, 0.32, 1),  # Emerald Dark
+            radius=[12]
         )
         self.btn_import.bind(on_press=self.open_system_file_picker)
         top_ctrl.add_widget(self.btn_import)
 
-        self.btn_history = Button(
-            text=ar("📋 سجل الأهداف"),
+        self.btn_history = RoundedButton(
+            text=ar("📋 سجل الأهداف المكتشفة"),
             font_name=FONT_PATH,
-            font_size='14sp',
-            background_color=(0.3, 0.3, 0.4, 1)
+            font_size='13sp',
+            bold=True,
+            bg_color=(0.25, 0.28, 0.38, 1),  # Slate Blue
+            radius=[12]
         )
         self.btn_history.bind(on_press=self.show_hit_history)
         top_ctrl.add_widget(self.btn_history)
         root.add_widget(top_ctrl)
 
+        # 3. حقل إدخال رقم اللوحة
         self.input_plate = TextInput(
-            hint_text=ar("أدخل رقم اللوحة أو الحروف..."),
+            hint_text=ar("اكتب رقم اللوحة أو الحروف هنا..."),
             font_name=FONT_PATH,
             multiline=False,
             size_hint=(1, 0.09),
-            font_size='18sp'
+            font_size='18sp',
+            background_color=(0.95, 0.96, 0.98, 1),
+            foreground_color=(0.1, 0.1, 0.1, 1),
+            padding=[14, 12]
         )
         root.add_widget(self.input_plate)
 
-        action_box = BoxLayout(orientation='horizontal', spacing=8, size_hint=(1, 0.1))
-        self.btn_search = Button(
+        # 4. أزرار الإجراءات السريعة (البحث والصوت)
+        action_box = BoxLayout(orientation='horizontal', spacing=10, size_hint=(1, 0.1))
+        self.btn_search = RoundedButton(
             text=ar("🔍 فحص اللوحة"),
             font_name=FONT_PATH,
-            font_size='17sp',
-            background_color=(0.1, 0.45, 0.75, 1)
+            font_size='16sp',
+            bold=True,
+            bg_color=(0.15, 0.48, 0.85, 1),  # Material Vibrant Blue
+            radius=[14]
         )
         self.btn_search.bind(on_press=lambda x: self.search_plate(self.input_plate.text))
         action_box.add_widget(self.btn_search)
 
-        self.btn_voice = Button(
+        self.btn_voice = RoundedButton(
             text=ar("🎙️ فحص بالصوت"),
             font_name=FONT_PATH,
-            font_size='17sp',
-            background_color=(0.85, 0.25, 0.2, 1)
+            font_size='16sp',
+            bold=True,
+            bg_color=(0.85, 0.22, 0.25, 1),  # Material Crimson
+            radius=[14]
         )
         self.btn_voice.bind(on_press=self.start_voice_recognition)
         action_box.add_widget(self.btn_voice)
         root.add_widget(action_box)
 
+        # 5. بطاقة عرض النتيجة المركزية الفاخرة
+        self.result_card = RoundedCard(bg_color=(0.12, 0.15, 0.22, 1), radius=[18],
+                                       padding=16, size_hint=(1, 0.65))
         self.result_panel = Label(
-            text=ar("جاهز للرصد الميداني.\nاكتب أو انطق رقم اللوحة."),
+            text=ar("رادار القناص نشط ومستعد.\n\nانطق رقم اللوحة أو اكتبه للفحص الفوري."),
             font_name=FONT_PATH,
-            font_size='17sp',
-            size_hint=(1, 0.68),
+            font_size='16sp',
             halign='center',
             valign='middle',
-            color=(0.9, 0.9, 0.9, 1)
+            color=(0.75, 0.8, 0.88, 1),
+            line_height=1.3
         )
         self.result_panel.bind(size=self.result_panel.setter('text_size'))
-        root.add_widget(self.result_panel)
+        self.result_card.add_widget(self.result_panel)
+        root.add_widget(self.result_card)
 
         if platform == 'android':
             Clock.schedule_once(lambda dt: self.init_android_features(), 0.5)
 
         return root
+
+    def _update_root_bg(self, instance):
+        instance.canvas.before.clear()
+        with instance.canvas.before:
+            Color(0.07, 0.09, 0.13, 1)
+            RoundedRectangle(pos=instance.pos, size=instance.size)
 
     def init_database(self):
         conn = sqlite3.connect(self.db_name)
@@ -340,7 +417,7 @@ class AlknasApp(App):
 
                 if result_code != Activity.RESULT_OK or data is None:
                     Clock.schedule_once(
-                        lambda dt: self._set_msg("لم يتم التقاط الصوت (تأكد من الاتصال أو نطق اللوحة بوضوح).", (1, 0.6, 0.2, 1)),
+                        lambda dt: self._set_msg("لم يتم التقاط الصوت (تأكد من نطق اللوحة بوضوح).", (1, 0.6, 0.2, 1)),
                         0
                     )
                     return
@@ -369,12 +446,12 @@ class AlknasApp(App):
         self.input_plate.text = parsed_text
         self.search_plate(parsed_text)
 
-    def _set_msg(self, msg, color=(1, 1, 1, 1)):
+    def _set_msg(self, msg, color=(0.85, 0.9, 0.95, 1)):
         self.result_panel.text = ar(msg)
         self.result_panel.color = color
 
     def _handle_selected_uri(self, uri):
-        self._set_msg("جاري استيراد ومعالجة الملف...", (1, 0.8, 0.2, 1))
+        self._set_msg("جاري استيراد ومعالجة الملف... يرجى الانتظار", (1, 0.8, 0.2, 1))
         threading.Thread(target=self._copy_and_import, args=(uri,), daemon=True).start()
 
     def _copy_and_import(self, uri):
@@ -410,7 +487,6 @@ class AlknasApp(App):
             Clock.schedule_once(lambda dt: self._import_done(0, f"تعذر قراءة الملف: {str(e)}"), 0)
 
     def _parse_xlsx_safely(self, file_path):
-        """قراءة ملفات xlsx الكبيرة بدقة متناهية مع دعم inlineStr و sharedStrings وتطابق الأعمدة"""
         def col_letter_to_index(col_str):
             num = 0
             for c in col_str:
@@ -475,13 +551,11 @@ class AlknasApp(App):
             with open(file_path, "rb") as f_check:
                 header = f_check.read(8)
 
-            # ملفات Excel الحديثة (XLSX)
             if header.startswith(b'PK'):
                 for row in self._parse_xlsx_safely(file_path):
                     yield row
                 return
 
-            # ملفات Excel القديمة (XLS)
             if header.startswith(b'\xd0\xcf\x11\xe0'):
                 try:
                     import xlrd
@@ -496,7 +570,6 @@ class AlknasApp(App):
                     Clock.schedule_once(lambda dt: self._set_msg(f"تعذر فتح ملف XLS: {e}", (1, 0.4, 0.4, 1)), 0)
                     return
 
-            # ملفات CSV النصية
             encodings = ['windows-1256', 'cp1256', 'utf-8-sig', 'utf-8']
             chosen_enc = 'windows-1256'
             for enc in encodings:
@@ -592,7 +665,7 @@ class AlknasApp(App):
             self._set_msg(f"تنبيه:\n{error}", (0.9, 0.2, 0.2, 1))
         else:
             self._set_msg(f"اكتمل الاستيراد بنجاح!\nتمت إضافة {count:,} سيارة مقروءة.", (0.2, 0.9, 0.2, 1))
-            self.stats_bar.text = ar(f"السيارات المسجلة: {self.get_total_records()} | الحالة: محدث")
+            self.stats_bar.text = ar(f"الأهداف: {self.get_total_records()} | محدث")
 
     def search_plate(self, query):
         digits_q, letters_q = extract_tokens(query)
@@ -644,46 +717,51 @@ class AlknasApp(App):
             conn.commit()
             conn.close()
 
+            # عرض النتيجة بتصميم رادار فوري مميز
             res_text = (
-                f"🚨 تم العثور على هدف مطلوب! 🚨\n\n"
-                f"اللوحة: {plate_val}\n"
-                f"الموديل: {model}\n"
-                f"الشاص: {chassis}\n"
-                f"الجهة: {bank}"
+                f"🚨 تم العثور على هدف مطلوب! 🚨\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"اللوحـة :  {plate_val}\n"
+                f"الموديـل :  {model}\n"
+                f"الشـاص :  {chassis}\n"
+                f"الجهـة :  {bank}\n"
+                f"━━━━━━━━━━━━━━━━━━"
             )
-            self._set_msg(res_text, (0.1, 1, 0.2, 1))
+            self._set_msg(res_text, (0.2, 1, 0.45, 1))  # لون أخضر نيون فسفوري للرصد
             self.trigger_alert(f"هدف مطلوب! {model}")
         else:
             conn.close()
             display_val = f"{digits_q} {letters_q}".strip()
-            self._set_msg(f"اللوحة ({display_val}) ليست في القائمة المطلوبة.", (0.9, 0.3, 0.3, 1))
+            self._set_msg(f"اللوحة ({display_val})\nليست مسجلة ضمن الأهداف المطلوبة.", (0.85, 0.4, 0.4, 1))
 
     def show_hit_history(self, instance):
         conn = sqlite3.connect(self.db_name)
         c = conn.cursor()
-        c.execute('SELECT plate, model, chassis, bank, created_at FROM hits_log ORDER BY id DESC LIMIT 15')
+        c.execute('SELECT plate, model, chassis, bank, created_at FROM hits_log ORDER BY id DESC LIMIT 20')
         rows = c.fetchall()
         conn.close()
 
         if not rows:
-            content_text = "لا توجد أهداف مسجلة حتى الآن."
+            content_text = "لا توجد أهداف مسجلة في السجل حتى الآن."
         else:
             lines = [f"• {r[0]} | {r[1]} | {r[2]} ({r[4]})" for r in rows]
             content_text = "\n\n".join(lines)
 
-        popup_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        lbl = Label(text=ar(content_text), font_name=FONT_PATH, font_size='14sp', halign='center')
+        popup_layout = BoxLayout(orientation='vertical', padding=14, spacing=12)
+        lbl = Label(text=ar(content_text), font_name=FONT_PATH, font_size='14sp', halign='center', color=(0.9, 0.9, 0.9, 1))
         lbl.bind(size=lbl.setter('text_size'))
         popup_layout.add_widget(lbl)
 
-        btn_close = Button(text=ar("إغلاق"), font_name=FONT_PATH, size_hint=(1, 0.2))
+        btn_close = RoundedButton(text=ar("إغلاق السجل"), font_name=FONT_PATH, size_hint=(1, 0.18),
+                                  bg_color=(0.25, 0.35, 0.5, 1), radius=[10])
         popup_layout.add_widget(btn_close)
 
         pop = Popup(
-            title=ar("سجل الصيد الميداني"),
+            title=ar("سجل الأهداف المكتشفة"),
             title_font=FONT_PATH,
             content=popup_layout,
-            size_hint=(0.9, 0.8)
+            size_hint=(0.9, 0.82),
+            background_color=(0.08, 0.1, 0.15, 0.95)
         )
         btn_close.bind(on_press=pop.dismiss)
         pop.open()

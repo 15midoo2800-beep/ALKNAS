@@ -5,16 +5,15 @@ from datetime import datetime
 import urllib.parse
 import webbrowser
 
-# محاولة استخدام أدوات تشكيل النصوص العربية
+# معالجة النصوص العربية ذاتياً دون الحاجة لمكتبات إضافية
 try:
     import arabic_reshaper
-    from bidi.algorithm import get_display
     def ar(text):
         if not text:
             return ""
         reshaped = arabic_reshaper.reshape(str(text))
-        return get_display(reshaped)
-except ImportError:
+        return reshaped[::-1]
+except Exception:
     def ar(text):
         return str(text)
 
@@ -23,14 +22,13 @@ from kivy.lang import Builder
 from kivy.core.text import LabelBase
 from kivy.utils import platform
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.modalview import ModalView
 from kivy.uix.filechooser import FileChooserListView
 from kivy.uix.popup import Popup
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.properties import StringProperty, NumericProperty
 
-# تسجيل خط عربي يدعم التشكيل
+# تسجيل خط عربي يدعم التشكيل إن وجد
 if os.path.exists("font.ttf"):
     LabelBase.register(name="AppFont", fn_regular="font.ttf")
     APP_FONT = "AppFont"
@@ -173,10 +171,7 @@ class MainLayout(BoxLayout):
             self.txt_main_info = ar("يرجى تفعيل التطبيق للبدء")
 
     def open_file_selector(self):
-        """فتح نافذة اختيار ملفات Excel / CSV تفاعلية"""
         layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
-        
-        # مسار التخزين الافتراضي
         start_path = "/sdcard" if platform == "android" else os.path.expanduser("~")
         
         chooser = FileChooserListView(
@@ -213,14 +208,13 @@ class MainLayout(BoxLayout):
         popup.open()
 
     def process_imported_file(self, filepath):
-        """قراءة الملف المحمّل وعد الأهداف بداخله"""
         try:
             filename = os.path.basename(filepath)
             count = 0
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 lines = [line.strip() for line in f if line.strip()]
                 count = len(lines)
-                self.raw_targets = lines[:200]  # حفظ عينة
+                self.raw_targets = lines[:200]
 
             self.target_count = count
             self.txt_header_status = f"{ar('الأهداف')}: {self.target_count} | {ar('تم التحميل')}"
@@ -233,7 +227,6 @@ class MainLayout(BoxLayout):
             self.ids.info_display.text = f"{ar('خطأ في قراءة الملف:')}\n{str(e)}"
 
     def show_targets_log(self):
-        """استعراض سجل الأهداف المحملة"""
         if not self.raw_targets:
             msg = ar("سجل الأهداف فارغ حالياً. قم باستيراد ملف أولاً.")
         else:
@@ -245,7 +238,7 @@ class MainLayout(BoxLayout):
         lbl.bind(size=lbl.setter('text_size'))
         box.add_widget(lbl)
         
-        btn_close = Button(text=ar("إغلاق"), font_name=APP_FONT, size_hint_y=0.2)
+        btn_close = Button(text=ar("إلغاء"), font_name=APP_FONT, size_hint_y=0.2)
         box.add_widget(btn_close)
         
         p = Popup(title=ar("سجل الأهداف"), title_font=APP_FONT, content=box, size_hint=(0.9, 0.7))
@@ -263,7 +256,6 @@ class AlknasApp(App):
         return self.root_layout
 
     def on_start(self):
-        # التحقق من وجود ملف التفعيل الساري
         if os.path.exists(LICENSE_FILE):
             try:
                 with open(LICENSE_FILE, "r", encoding="utf-8") as f:

@@ -1,348 +1,386 @@
 import os
 import uuid
-import base64
-import hmac
 import hashlib
 from datetime import datetime
-import webbrowser
 import urllib.parse
+import webbrowser
 
+from kivy.app import App
+from kivy.lang import Builder
 from kivy.core.text import LabelBase
 from kivy.core.clipboard import Clipboard
 from kivy.utils import platform
-from kivy.lang import Builder
-from kivy.uix.screenmanager import Screen
-from kivymd.app import MDApp
-from kivymd.uix.menu import MDDropdownMenu
-from kivymd.uix.snackbar import Snackbar
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.modalview import ModalView
+from kivy.properties import StringProperty, NumericProperty
 
 # تسجيل الخط العربي إن وجد
 if os.path.exists("font.ttf"):
     LabelBase.register(name="AppFont", fn_regular="font.ttf")
-    DEFAULT_FONT = "AppFont"
+    APP_FONT = "AppFont"
 else:
-    DEFAULT_FONT = "Roboto"
+    APP_FONT = "Roboto"
+
+# المفتاح السري الموحد
+SALT = "ALKNAS_PRO_SECURITY_2026"
+LICENSE_FILE = "license.dat"
+WHATSAPP_NUMBER = "201155661920"
 
 KV = '''
-<ActivationScreen>:
-    name: "activation"
+<ActivationPopup>:
+    size_hint: 0.9, 0.72
+    auto_dismiss: False
+    background_color: 0, 0, 0, 0.75
+
+    BoxLayout:
+        orientation: "vertical"
+        padding: ["18dp", "20dp", "18dp", "20dp"]
+        spacing: "12dp"
+        canvas.before:
+            Color:
+                rgba: 0.14, 0.14, 0.14, 1
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [8, 8, 8, 8]
+
+        # العنوان
+        Label:
+            text: "تفعيل القناص"
+            font_name: root.font_name
+            font_size: "20sp"
+            bold: True
+            color: 1, 1, 1, 1
+            size_hint_y: None
+            height: "32dp"
+
+        Widget:
+            size_hint_y: None
+            height: "1.5dp"
+            canvas.before:
+                Color:
+                    rgba: 0.2, 0.65, 0.85, 1
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+
+        Label:
+            text: "نسخة تجارية مقفلة - مطلوب التفعيل"
+            font_name: root.font_name
+            font_size: "15sp"
+            color: 0.85, 0.85, 0.85, 1
+            size_hint_y: None
+            height: "35dp"
+
+        Widget:
+            size_hint_y: 0.1
+
+        # كود الجهاز
+        Label:
+            text: "كود جهازك (أرسله للإدارة):"
+            font_name: root.font_name
+            font_size: "16sp"
+            color: 0.35, 0.68, 0.95, 1
+            size_hint_y: None
+            height: "26dp"
+
+        Label:
+            text: root.device_id
+            font_size: "19sp"
+            bold: True
+            color: 0.35, 0.68, 0.95, 1
+            size_hint_y: None
+            height: "30dp"
+
+        Widget:
+            size_hint_y: 0.05
+
+        # حقل إدخال الكود
+        TextInput:
+            id: key_input
+            multiline: False
+            halign: "center"
+            font_size: "16sp"
+            bold: True
+            background_normal: ""
+            background_color: 0.92, 0.93, 0.94, 1
+            foreground_color: 0.1, 0.1, 0.1, 1
+            padding: [10, 10, 10, 10]
+            size_hint_y: None
+            height: "44dp"
+
+        # رسالة الخطأ أو النجاح
+        Label:
+            id: error_label
+            text: root.status_message
+            font_name: root.font_name
+            font_size: "14sp"
+            color: root.status_color
+            size_hint_y: None
+            height: "26dp"
+
+        Widget:
+            size_hint_y: 0.1
+
+        # زر التفعيل الأخضر
+        Button:
+            text: "تفعيل الترخيص"
+            font_name: root.font_name
+            font_size: "17sp"
+            bold: True
+            background_normal: ""
+            background_color: 0.05, 0.38, 0.15, 1
+            size_hint_y: None
+            height: "46dp"
+            on_release: root.do_activate()
+
+        # زر التواصل مع الإدارة
+        Button:
+            text: "تواصل مع الإدارة عبر واتساب"
+            font_name: root.font_name
+            font_size: "14sp"
+            background_normal: ""
+            background_color: 0.12, 0.22, 0.32, 1
+            size_hint_y: None
+            height: "36dp"
+            on_release: root.contact_admin()
+
+
+<MainLayout>:
+    orientation: "vertical"
     canvas.before:
         Color:
-            rgba: 0.06, 0.08, 0.12, 1
+            rgba: 0.02, 0.03, 0.05, 1
         Rectangle:
             pos: self.pos
             size: self.size
 
-    ScrollView:
-        do_scroll_x: False
-        do_scroll_y: True
+    # الشريط العلوي
+    BoxLayout:
+        orientation: "horizontal"
+        size_hint_y: None
+        height: "55dp"
+        padding: ["16dp", "0dp", "16dp", "0dp"]
+        canvas.before:
+            Color:
+                rgba: 0.05, 0.07, 0.1, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
-        BoxLayout:
-            orientation: "vertical"
-            padding: ["22dp", "28dp", "22dp", "30dp"]
-            spacing: "18dp"
-            size_hint_y: None
-            height: self.minimum_height
+        Label:
+            text: f"الأهداف: {root.target_count} | {root.app_status}"
+            font_name: root.font_name
+            font_size: "15sp"
+            color: 0.18, 0.75, 0.35, 1
+            halign: "left"
+            valign: "middle"
+            text_size: self.size
 
-            # العنوان والشعار
-            BoxLayout:
-                orientation: "vertical"
-                spacing: "6dp"
-                size_hint_y: None
-                height: "80dp"
+        Label:
+            text: "القناص PRO 🎯"
+            font_name: root.font_name
+            font_size: "20sp"
+            bold: True
+            color: 0.85, 0.88, 0.92, 1
+            halign: "right"
+            valign: "middle"
+            text_size: self.size
 
-                MDLabel:
-                    text: "🛡️ تفعيل التطبيق"
-                    font_name: root.app_font
-                    font_size: "30sp"
-                    bold: True
-                    halign: "center"
-                    theme_text_color: "Custom"
-                    text_color: 0.2, 0.85, 0.55, 1
+    # أزرار الوظائف العلوية
+    BoxLayout:
+        orientation: "horizontal"
+        size_hint_y: None
+        height: "55dp"
+        spacing: "1dp"
+        canvas.before:
+            Color:
+                rgba: 0.12, 0.15, 0.2, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
-                MDLabel:
-                    text: "يرجى إدخال مفتاح الترخيص أو طلب التفعيل"
-                    font_name: root.app_font
-                    font_size: "16sp"
-                    halign: "center"
-                    theme_text_color: "Custom"
-                    text_color: 0.65, 0.72, 0.82, 1
+        Button:
+            text: "سجل الأهداف 📋"
+            font_name: root.font_name
+            font_size: "15sp"
+            background_normal: ""
+            background_color: 0.06, 0.08, 0.12, 1
+            on_release: root.on_targets_log()
 
-            # بطاقة كود الجهاز
-            MDCard:
-                orientation: "vertical"
-                padding: ["18dp", "16dp", "18dp", "16dp"]
-                spacing: "12dp"
-                radius: [18, 18, 18, 18]
-                elevation: 4
-                md_bg_color: 0.12, 0.16, 0.23, 1
-                size_hint_y: None
-                height: "155dp"
+        Button:
+            text: "استيراد مشفر (Excel/CSV) 📥"
+            font_name: root.font_name
+            font_size: "15sp"
+            background_normal: ""
+            background_color: 0.06, 0.08, 0.12, 1
+            on_release: root.on_import_data()
 
-                MDLabel:
-                    text: "كود الجهاز الخاص بك (Device ID):"
-                    font_name: root.app_font
-                    font_size: "17sp"
-                    bold: True
-                    theme_text_color: "Custom"
-                    text_color: 0.85, 0.88, 0.92, 1
-                    size_hint_y: None
-                    height: "26dp"
+    # مساحة العمل الرئيسية
+    BoxLayout:
+        orientation: "vertical"
+        padding: "20dp"
+        spacing: "15dp"
 
-                BoxLayout:
-                    orientation: "horizontal"
-                    spacing: "12dp"
-                    size_hint_y: None
-                    height: "55dp"
-
-                    MDLabel:
-                        id: device_id_label
-                        text: root.device_id
-                        font_size: "22sp"
-                        bold: True
-                        theme_text_color: "Custom"
-                        text_color: 0.25, 0.88, 0.55, 1
-                        valign: "middle"
-
-                    MDRaisedButton:
-                        text: "نسخ الكود 📋"
-                        font_name: root.app_font
-                        font_size: "17sp"
-                        bold: True
-                        size_hint_y: 1
-                        md_bg_color: 0.2, 0.55, 0.85, 1
-                        on_release: root.copy_device_code()
-
-            # بطاقة إدخال المفتاح وتأكيده
-            MDCard:
-                orientation: "vertical"
-                padding: ["18dp", "18dp", "18dp", "18dp"]
-                spacing: "14dp"
-                radius: [18, 18, 18, 18]
-                elevation: 4
-                md_bg_color: 0.12, 0.16, 0.23, 1
-                size_hint_y: None
-                height: "190dp"
-
-                MDTextField:
-                    id: key_input
-                    hint_text: "أدخل كود التفعيل هنا"
-                    font_name_hint_text: root.app_font
-                    font_size: "19sp"
-                    mode: "rectangle"
-                    line_color_focus: 0.25, 0.88, 0.55, 1
-                    hint_text_color_normal: 0.65, 0.7, 0.78, 1
-                    text_color_normal: 1, 1, 1, 1
-
-                MDRaisedButton:
-                    text: "تأكيد وتفعيل التطبيق 🚀"
-                    font_name: root.app_font
-                    font_size: "19sp"
-                    bold: True
-                    size_hint_x: 1
-                    height: "54dp"
-                    md_bg_color: 0.18, 0.78, 0.44, 1
-                    on_release: root.verify_license()
-
-            # بطاقة شراء الاشتراك
-            MDCard:
-                orientation: "vertical"
-                padding: ["18dp", "18dp", "18dp", "18dp"]
-                spacing: "14dp"
-                radius: [18, 18, 18, 18]
-                elevation: 4
-                md_bg_color: 0.1, 0.13, 0.19, 1
-                size_hint_y: None
-                height: "205dp"
-
-                MDLabel:
-                    text: "طلب تفعيل جديد:"
-                    font_name: root.app_font
-                    font_size: "19sp"
-                    bold: True
-                    theme_text_color: "Custom"
-                    text_color: 1, 1, 1, 1
-                    size_hint_y: None
-                    height: "28dp"
-
-                MDRaisedButton:
-                    id: duration_btn
-                    text: "مدة الاشتراك: شهر واحد ▼"
-                    font_name: root.app_font
-                    font_size: "18sp"
-                    bold: True
-                    size_hint_x: 1
-                    height: "50dp"
-                    md_bg_color: 0.2, 0.26, 0.36, 1
-                    on_release: root.open_duration_menu()
-
-                MDRaisedButton:
-                    text: "إرسال طلب التفعيل عبر واتساب 💬"
-                    font_name: root.app_font
-                    font_size: "18sp"
-                    bold: True
-                    size_hint_x: 1
-                    height: "52dp"
-                    md_bg_color: 0.15, 0.68, 0.37, 1
-                    on_release: root.send_to_whatsapp()
-
-            # زر التواصل السريع مع الإدارة
-            MDRaisedButton:
-                text: "تواصل مع الإدارة مباشرة 📞"
-                font_name: root.app_font
-                font_size: "18sp"
-                bold: True
-                size_hint_x: 1
-                height: "54dp"
-                md_bg_color: 0.12, 0.45, 0.28, 1
-                on_release: root.contact_admin()
+        Label:
+            text: root.main_screen_info
+            font_name: root.font_name
+            font_size: "16sp"
+            color: 0.6, 0.65, 0.75, 1
+            halign: "center"
+            valign: "middle"
+            text_size: self.size
 '''
 
-class ActivationScreen(Screen):
-    WHATSAPP_NUMBER = "201155661920"
-    app_font = DEFAULT_FONT
-    SECRET_KEY = b"ALKNAS_SECURE_KEY_2026_PRO"
+def get_hwid():
+    """استخراج كود الجهاز الحقيقي"""
+    if platform == "android":
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Secure = autoclass('android.provider.Settings$Secure')
+            context = PythonActivity.mActivity.getContentResolver()
+            aid = Secure.getString(context, Secure.ANDROID_ID)
+            if aid:
+                return str(aid)[:12].upper()
+        except Exception:
+            pass
+    return str(uuid.getnode())[:12].upper()
 
-    def __init__(self, **kwargs):
-        self.device_id = self.get_unique_device_id()
-        self.selected_duration = "شهر واحد"
+
+class ActivationPopup(ModalView):
+    device_id = StringProperty("")
+    font_name = StringProperty(APP_FONT)
+    status_message = StringProperty("")
+    status_color = [0.95, 0.3, 0.3, 1]
+
+    def __init__(self, main_widget, **kwargs):
         super().__init__(**kwargs)
-        self.menu = None
+        self.main_widget = main_widget
+        self.device_id = get_hwid()
 
-    def get_unique_device_id(self):
-        if platform == "android":
-            try:
-                from jnius import autoclass
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                Secure = autoclass('android.provider.Settings$Secure')
-                context = PythonActivity.mActivity.getContentResolver()
-                android_id = Secure.getString(context, Secure.ANDROID_ID)
-                if android_id:
-                    return str(android_id)[:10].upper()
-            except Exception:
-                pass
-        return str(uuid.getnode())[:10].upper()
-
-    def on_kv_post(self, base_widget):
-        durations = ["شهر واحد", "3 أشهر", "6 أشهر", "سنة كاملة"]
-        menu_items = [
-            {
-                "viewclass": "OneLineListItem",
-                "text": dur,
-                "font_name": self.app_font,
-                "on_release": lambda x=dur: self.set_duration(x),
-            } for dur in durations
-        ]
-        self.menu = MDDropdownMenu(
-            caller=self.ids.duration_btn,
-            items=menu_items,
-            width_mult=4,
-        )
-
-    def open_duration_menu(self):
-        if self.menu:
-            self.menu.open()
-
-    def set_duration(self, text_item):
-        self.selected_duration = text_item
-        self.ids.duration_btn.text = f"مدة الاشتراك: {text_item} ▼"
-        self.menu.dismiss()
-
-    def copy_device_code(self):
-        Clipboard.copy(self.device_id)
-        Snackbar(
-            text="تم نسخ كود الجهاز بنجاح! ✅",
-            font_size="17sp",
-            duration=2
-        ).open()
-
-    def _open_whatsapp(self, message):
-        encoded_msg = urllib.parse.quote(message)
-        if platform == "android":
-            try:
-                from jnius import autoclass
-                Intent = autoclass('android.content.Intent')
-                Uri = autoclass('android.net.Uri')
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-
-                url = f"https://api.whatsapp.com/send?phone={self.WHATSAPP_NUMBER}&text={encoded_msg}"
-                intent = Intent(Intent.ACTION_VIEW)
-                intent.setData(Uri.parse(url))
-                PythonActivity.mActivity.startActivity(intent)
-                return
-            except Exception:
-                pass
-
-        web_url = f"https://wa.me/{self.WHATSAPP_NUMBER}?text={encoded_msg}"
-        webbrowser.open(web_url)
-
-    def send_to_whatsapp(self):
-        msg = (
-            f"مرحباً، أود شراء تفعيل لتطبيق القناص.\n"
-            f"📱 كود جهازي: {self.device_id}\n"
-            f"⏳ مدة الاشتراك المطلوبة: {self.selected_duration}"
-        )
-        self._open_whatsapp(msg)
-
-    def contact_admin(self):
-        msg = (
-            f"مرحباً إدارة تطبيق القناص، أود الاستفسار والتواصل بخصوص التفعيل.\n"
-            f"📱 كود جهازي: {self.device_id}"
-        )
-        self._open_whatsapp(msg)
-
-    def verify_license(self):
-        entered_key = self.ids.key_input.text.strip()
+    def do_activate(self):
+        entered_key = self.ids.key_input.text.strip().upper()
         if not entered_key:
-            Snackbar(text="يرجى إدخال كود التفعيل أولاً", font_size="16sp").open()
+            self.show_status("يرجى إدخال كود التفعيل", False)
             return
 
-        # فحص المفتاح المشفر
+        parts = entered_key.split("-")
+        # التنسيق القياسي المعتمد: كود_الجهاز-تاريخ_الانتهاء-التوقيع
+        if len(parts) != 3:
+            self.show_status("تنسيق المفتاح غير صحيح", False)
+            return
+
+        dev_id, exp_str, sig = parts
+
+        # 1. مطابقة كود الجهاز
+        if dev_id != self.device_id:
+            self.show_status("هذا المفتاح مخصص لجهاز آخر", False)
+            return
+
+        # 2. مطابقة التوقيع الرقمي
+        raw_token = f"{SALT}{dev_id}{exp_str}"
+        expected_sig = hashlib.sha256(raw_token.encode('utf-8')).hexdigest().upper()[:8]
+        if sig != expected_sig:
+            self.show_status("رمز التحقق غير مطابق", False)
+            return
+
+        # 3. فحص تاريخ الانتهاء
         try:
-            decoded = base64.b64decode(entered_key.encode('utf-8')).decode('utf-8')
-            parts = decoded.split("|")
-            if len(parts) != 3:
-                raise ValueError("Format error")
-
-            dev_id, expiry_str, signature = parts
-
-            # 1. التحقق من تطابق كود الجهاز
-            if dev_id.upper() != self.device_id:
-                Snackbar(text="❌ هذا الكود مخصص لجهاز آخر!", font_size="16sp").open()
+            exp_date = datetime.strptime(exp_str, "%Y%m%d").date()
+            if datetime.now().date() > exp_date:
+                self.show_status(f"انتهت صلاحية المفتاح في ({exp_date})", False)
                 return
+        except ValueError:
+            self.show_status("تنسيق التاريخ غير صحيح", False)
+            return
 
-            # 2. التحقق من التوقيع الرقمي لمنع التزوير
-            expected_sig = hmac.new(
-                self.SECRET_KEY,
-                f"{dev_id}|{expiry_str}".encode('utf-8'),
-                hashlib.sha256
-            ).hexdigest()[:12]
-
-            if signature != expected_sig:
-                Snackbar(text="❌ كود تفعيل غير صالح أو مزور!", font_size="16sp").open()
-                return
-
-            # 3. التحقق من الصلاحية والتاريخ
-            expiry_date = datetime.strptime(expiry_str, "%Y-%m-%d")
-            if datetime.now() > expiry_date:
-                Snackbar(text=f"⚠️ انتهت صلاحية هذا الكود في ({expiry_str})", font_size="16sp").open()
-                return
-
-            Snackbar(
-                text=f"✅ تم التفعيل بنجاح! صالح حتى: {expiry_str}",
-                font_size="17sp",
-                duration=3
-            ).open()
-
+        # حفظ ملف الترخيص محلياً
+        try:
+            with open(LICENSE_FILE, "w", encoding="utf-8") as f:
+                f.write(entered_key)
         except Exception:
-            Snackbar(text="❌ كود التفعيل غير صالح، يرجى التأكد منه", font_size="16sp").open()
+            pass
+
+        self.show_status("تم التفعيل بنجاح! جاري الفتح...", True)
+        self.main_widget.unlock_app(exp_date)
+        self.dismiss()
+
+    def show_status(self, msg, is_success):
+        self.status_message = msg
+        self.status_color = [0.2, 0.85, 0.4, 1] if is_success else [0.95, 0.3, 0.3, 1]
+
+    def contact_admin(self):
+        msg = f"مرحباً إدارة القناص، أود تفعيل التطبيق.\nكود جهازي: {self.device_id}"
+        enc = urllib.parse.quote(msg)
+        webbrowser.open(f"https://wa.me/{WHATSAPP_NUMBER}?text={enc}")
 
 
-class MainApp(MDApp):
+class MainLayout(BoxLayout):
+    font_name = StringProperty(APP_FONT)
+    target_count = NumericProperty(0)
+    app_status = StringProperty("جاري التحقق")
+    main_screen_info = StringProperty("يرجى تفعيل التطخيص للبدء")
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.popup = None
+
+    def on_start_check(self):
+        """فحص حالة التفعيل عند فتح التطبيق"""
+        if self.check_existing_license():
+            return
+        # إظهار نافذة التفعيل إذا لم يكن مفعلاً
+        self.popup = ActivationPopup(main_widget=self)
+        self.popup.open()
+
+    def check_existing_license(self):
+        if not os.path.exists(LICENSE_FILE):
+            return False
+        try:
+            with open(LICENSE_FILE, "r", encoding="utf-8") as f:
+                saved_key = f.read().strip().upper()
+            dev_id, exp_str, sig = saved_key.split("-")
+            if dev_id == get_hwid():
+                raw_token = f"{SALT}{dev_id}{exp_str}"
+                if sig == hashlib.sha256(raw_token.encode('utf-8')).hexdigest().upper()[:8]:
+                    exp_date = datetime.strptime(exp_str, "%Y%m%d").date()
+                    if datetime.now().date() <= exp_date:
+                        self.unlock_app(exp_date)
+                        return True
+        except Exception:
+            pass
+        return False
+
+    def unlock_app(self, exp_date):
+        self.app_status = "مفعل وجاهز"
+        self.main_screen_info = f"مرحباً بك في القناص PRO\nالاشتراك سارٍ حتى: {exp_date}\nجاهز لاستيراد الأهداف ومطابقة اللوحات."
+
+    def on_import_data(self):
+        if self.app_status == "جاري التحقق":
+            if self.popup:
+                self.popup.open()
+            return
+        # كود استيراد البيانات
+        pass
+
+    def on_targets_log(self):
+        if self.app_status == "جاري التحقق":
+            if self.popup:
+                self.popup.open()
+            return
+        # كود عرض السجل
+        pass
+
+
+class AlknasApp(App):
     def build(self):
-        self.theme_cls.theme_style = "Dark"
         Builder.load_string(KV)
-        return ActivationScreen()
+        root = MainLayout()
+        return root
+
+    def on_start(self):
+        self.root.on_start_check()
 
 if __name__ == "__main__":
-    MainApp().run()
+    AlknasApp().run()

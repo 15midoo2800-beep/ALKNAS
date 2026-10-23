@@ -3,7 +3,14 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
+from kivy.core.text import LabelBase
 import os
+
+# تسجيل الخط العربي الموجود في مستودع GitHub لديك (تأكد أن اسم الملف مطابق، مثلاً font.ttf أو Amiri-Bold.ttf)
+try:
+    LabelBase.register(name='ArabicFont', fn_regular='font.ttf')
+except Exception as e:
+    print(f"خطأ في تحميل الخط: {e}")
 
 class AlknasApp(App):
     def build(self):
@@ -11,6 +18,7 @@ class AlknasApp(App):
         
         self.header_label = Label(
             text="تطبيق القناص - النسخة المستقرة", 
+            font_name='ArabicFont',
             font_size=20, 
             size_hint=(1, 0.2)
         )
@@ -18,17 +26,23 @@ class AlknasApp(App):
         
         self.info_label = Label(
             text="الحالة: يعمل بثبات تام بدون إغلاق فجائي",
+            font_name='ArabicFont',
             font_size=16,
             size_hint=(1, 0.2)
         )
         root_layout.add_widget(self.info_label)
         
-        btn = Button(text="اختبار عمل التطبيق", size_hint=(1, 0.2))
+        btn = Button(
+            text="اختبار عمل التطبيق", 
+            font_name='ArabicFont',
+            size_hint=(1, 0.2)
+        )
         btn.bind(on_press=self.on_btn_click)
         root_layout.add_widget(btn)
         
         self.log_input = TextInput(
             text="--- تم فتح التطبيق بنجاح وثبات ---\n",
+            font_name='ArabicFont',
             readonly=True,
             size_hint=(1, 0.4)
         )

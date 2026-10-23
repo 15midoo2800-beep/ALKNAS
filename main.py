@@ -15,7 +15,7 @@ from kivy.uix.popup import Popup
 # =====================================================================
 class CoreDatabaseManager:
     """
-    [منطقة محظور المساس بها - تم الحفاظ على كفاءتك العبقرية]
+    [منطقة محمصة وثابتة] 
     هذا القسم مخصص لقراءة ورفع ملفات (Excel / CSV) الضخمة 
     والتعرف على اللغة العربية والخطوط بدقة متناهية.
     """
@@ -23,7 +23,6 @@ class CoreDatabaseManager:
         pass
 
     def load_heavy_database(self, file_path):
-        # دالة قراءة قاعدة البيانات الضخمة ومطابقة آلاف اللوحات
         try:
             if file_path.endswith('.xlsx'):
                 return pd.read_excel(file_path)
@@ -34,10 +33,11 @@ class CoreDatabaseManager:
         return None
 
 # =====================================================================
-# 2. وحدة الإدارة الميدانية المتكاملة (الحي، الشارع، الملاحظات، والدمج)
+# 2. وحدة الإدارة الميدانية المتكاملة (الحي، الشارع، الملاحظات، والدمج الآمن)
 # =====================================================================
 class FieldManagementManager:
-    def __init__(self):
+    def __init__(self, app_instance):
+        self.app_instance = app_instance
         self.current_district = "النهضة"
         self.current_street = "ض 1"
         self.street_map_link = ""
@@ -68,36 +68,42 @@ class FieldManagementManager:
 
     def export_and_merge_excel(self, new_records_df, output_filename="data_تسجيل.xlsx", merge_with_existing=False):
         """
-        خيارات تصدير ودمج ملفات الإكسل (إنشاء ملف جديد أو الدمج على ملف سابق)
+        خيارات تصدير ودمج ملفات الإكسل باستخدام مسار آمن تماماً لأندرويد لتجنب الانهيار
         """
-        download_dir = os.path.join(os.path.expanduser("~"), "Downloads", "SHEEKHA")
-        os.makedirs(download_dir, exist_ok=True)
-        file_path = os.path.join(download_dir, output_filename)
+        try:
+            # استخدام مسار تخزين آمن داخل التطبيق على أندرويد لعدم حدوث Crash
+            safe_dir = self.app_instance.user_data_dir
+            os.makedirs(safe_dir, exist_ok=True)
+            file_path = os.path.join(safe_dir, output_filename)
 
-        # إضافة بيانات النطاق الجغرافي والملاحظات للسجلات
-        new_records_df['الحي'] = self.current_district
-        new_records_df['الشارع'] = self.current_street
-        new_records_df['الموقع'] = self.street_map_link
-        new_records_df['ملاحظات'] = self.current_note
+            # إضافة بيانات النطاق الجغرافي والملاحظات للسجلات
+            new_records_df['الحي'] = self.current_district
+            new_records_df['الشارع'] = self.current_street
+            new_records_df['الموقع'] = self.street_map_link
+            new_records_df['ملاحظات'] = self.current_note
 
-        if merge_with_existing and os.path.exists(file_path):
-            try:
-                existing_df = pd.read_excel(file_path)
-                combined_df = pd.concat([existing_df, new_records_df], ignore_index=True)
-                combined_df.to_excel(file_path, index=False)
-            except Exception:
+            if merge_with_existing and os.path.exists(file_path):
+                try:
+                    existing_df = pd.read_excel(file_path)
+                    combined_df = pd.concat([existing_df, new_records_df], ignore_index=True)
+                    combined_df.to_excel(file_path, index=False)
+                except Exception:
+                    new_records_df.to_excel(file_path, index=False)
+            else:
                 new_records_df.to_excel(file_path, index=False)
-        else:
-            new_records_df.to_excel(file_path, index=False)
 
-        return file_path
+            return file_path
+        except Exception as e:
+            print(f"خطأ في التصدير: {e}")
+            return ""
 
 # =====================================================================
-# 3. واجهة تطبيق القناص الشاملة (Kivy UI)
+# 3. واجهة تطبيق القناص الشاملة والمستقرة (Kivy UI)
 # =====================================================================
 class AlknasApp(App):
     def build(self):
-        self.field_manager = FieldManagementManager()
+        # ربط مدير الحقول بـ App لضمان الأمان على أندرويد
+        self.field_manager = FieldManagementManager(self)
         self.db_manager = CoreDatabaseManager()
         
         root_layout = BoxLayout(orientation='vertical', padding=15, spacing=10)
@@ -105,7 +111,7 @@ class AlknasApp(App):
         # العنوان الرئيسي
         self.header_label = Label(
             text="تطبيق القناص - لوحة التحكم الميدانية", 
-            font_size=22, 
+            font_size=20, 
             size_hint=(1, 0.1)
         )
         root_layout.add_widget(self.header_label)
@@ -113,7 +119,7 @@ class AlknasApp(App):
         # لوحة معلومات النطاق الحالي (الحي والشارع)
         self.info_label = Label(
             text=f"الحي: {self.field_manager.current_district} | الشارع: {self.field_manager.current_street}\nالملاحظة: {self.field_manager.current_note}",
-            font_size=16,
+            font_size=15,
             size_hint=(1, 0.15)
         )
         root_layout.add_widget(self.info_label)
@@ -141,7 +147,7 @@ class AlknasApp(App):
         
         # شاشة سجل الرصد المصغرة
         self.log_input = TextInput(
-            text="--- سجل اللوحات المرصودة يظهر هنا ---\n",
+            text="--- سجل اللوحات المرصودة يعمل بثبات ---\n",
             readonly=True,
             size_hint=(1, 0.35)
         )
@@ -192,17 +198,19 @@ class AlknasApp(App):
         popup.open()
 
     def trigger_export(self, instance):
-        # تجربة تصدير بيانات وهمية للتأكد من سلامة دالة الإكسل والدمج
         sample_df = pd.DataFrame({
             'الحروف': ['ر ب ط', 'ع ك ك'],
             'الارقام': [6646, 5544],
             'الحالة': ['مقبول', 'مقبول']
         })
         path = self.field_manager.export_and_merge_excel(sample_df, output_filename="data_alknas.xlsx", merge_with_existing=True)
-        self.log_input.text += f"\n[تم التصدير والدمج بنجاح]: {path}"
+        if path:
+            self.log_input.text += f"\n[تم التصدير بنجاح]: {path}"
+        else:
+            self.log_input.text += "\n[خطأ في مسار التخزين]"
 
     def show_status(self, instance):
-        self.log_input.text += "\n[النظام يعمل بكفاءة]: القاعدة الضخمة ومحرك البحث جاهزان."
+        self.log_input.text += "\n[النظام مستقر]: مسارات أندرويد تعمل بكفاءة."
 
 if __name__ == '__main__':
     AlknasApp().run()

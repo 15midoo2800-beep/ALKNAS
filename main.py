@@ -11,7 +11,7 @@ from kivy.uix.spinner import Spinner
 from kivy.uix.popup import Popup
 from kivy.core.text import LabelBase
 
-# معالجة آمنة للنصوص العربية لضمان ظهورها بشكل صحيح وغير معكوس
+# معالجة النصوص العربية لضمان ظهورها متصلة وصحيحة 100%
 HAS_ARABIC_FIX = False
 try:
     import arabic_reshaper
@@ -25,14 +25,13 @@ def arabic_text(text):
         return ""
     if HAS_ARABIC_FIX:
         try:
-            # ترتيب ومعالجة الحروف العربية للظهور بشكل متصل وصحيح
             reshaped_text = arabic_reshaper.reshape(text)
             return get_display(reshaped_text)
         except:
             return text
     return text
 
-# تسجيل الخط العربي (تأكد أن ملف font.ttf موجود في المستودع لديك)
+# تسجيل الخط العربي (تأكد من وجود font.ttf في المستودع)
 font_path = 'font.ttf'
 if os.path.exists(font_path):
     try:
@@ -70,8 +69,8 @@ class FieldManagementManager:
     def set_note(self, note):
         self.current_note = note if note else "بدون ملاحظة"
 
-    def save_record_locally(self, plate_letters, plate_numbers):
-        """حفظ السجلات محلياً بمسار آمن داخل أندرويد بصيغة منظمة"""
+    def save_record_locally(self, plate_text):
+        """حفظ السجلات محلياً بمسار آمن داخل أندرويد"""
         try:
             safe_dir = self.app_instance.user_data_dir
             os.makedirs(safe_dir, exist_ok=True)
@@ -82,8 +81,7 @@ class FieldManagementManager:
                 "الحي": self.current_district,
                 "الشارع": self.current_street,
                 "الملاحظة": self.current_note,
-                "الحروف": plate_letters,
-                "الارقام": plate_numbers,
+                "لوحة_البحث": plate_text,
                 "الموقع": self.street_map_link
             }
 
@@ -109,14 +107,14 @@ class AlknasApp(App):
         self.field_manager = FieldManagementManager(self)
         current_font = 'ArabicFont' if os.path.exists(font_path) else 'Roboto'
         
-        root_layout = BoxLayout(orientation='vertical', padding=15, spacing=10)
+        root_layout = BoxLayout(orientation='vertical', padding=10, spacing=8)
         
         # العنوان الرئيسي
         self.header_label = Label(
-            text=arabic_text("تطبيق القناص - لوحة التحكم الميدانية"), 
+            text=arabic_text("تطبيق القناص - نظام الرصد الميداني"), 
             font_name=current_font,
             font_size=18, 
-            size_hint=(1, 0.1)
+            size_hint=(1, 0.08)
         )
         root_layout.add_widget(self.header_label)
         
@@ -125,13 +123,30 @@ class AlknasApp(App):
         self.info_label = Label(
             text=self.info_display_text,
             font_name=current_font,
-            font_size=14,
-            size_hint=(1, 0.15)
+            font_size=13,
+            size_hint=(1, 0.12)
         )
         root_layout.add_widget(self.info_label)
         
+        # شاشة البحث وإدخال اللوحات (مشابهة للفيديوهات)
+        search_layout = BoxLayout(orientation='horizontal', spacing=5, size_hint=(1, 0.1))
+        self.search_input = TextInput(
+            hint_text=arabic_text("اكتب أو انطق رقم اللوحة للبحث..."),
+            font_name=current_font,
+            size_hint=(0.75, 1)
+        )
+        btn_search = Button(
+            text=arabic_text("بحث ورصد"),
+            font_name=current_font,
+            size_hint=(0.25, 1)
+        )
+        btn_search.bind(on_press=self.perform_search_and_record)
+        search_layout.add_widget(self.search_input)
+        search_layout.add_widget(btn_search)
+        root_layout.add_widget(search_layout)
+        
         # أزرار التحكم والعمليات الميدانية
-        controls_layout = GridLayout(cols=2, spacing=10, size_hint=(1, 0.35))
+        controls_layout = GridLayout(cols=2, spacing=8, size_hint=(1, 0.3))
         
         btn_set_location = Button(text=arabic_text("تحديد الحي والشارع"), font_name=current_font)
         btn_set_location.bind(on_press=self.open_location_popup)
@@ -141,9 +156,9 @@ class AlknasApp(App):
         btn_set_note.bind(on_press=self.open_notes_popup)
         controls_layout.add_widget(btn_set_note)
         
-        btn_add_record = Button(text=arabic_text("تسجيل لوحة تجريبية"), font_name=current_font)
-        btn_add_record.bind(on_press=self.trigger_save_record)
-        controls_layout.add_widget(btn_add_record)
+        btn_clear = Button(text=arabic_text("مسح السجل"), font_name=current_font)
+        btn_clear.bind(on_press=self.clear_log)
+        controls_layout.add_widget(btn_clear)
         
         btn_status = Button(text=arabic_text("حالة النظام"), font_name=current_font)
         btn_status.bind(on_press=self.show_status)
@@ -151,12 +166,12 @@ class AlknasApp(App):
         
         root_layout.add_widget(controls_layout)
         
-        # شاشة سجل الرصد المصغرة
+        # شاشة سجل الرصد والمتابعة
         self.log_input = TextInput(
-            text=arabic_text("--- تم تهيئة النظام الميداني بنجاح ---\n"),
+            text=arabic_text("--- جاهز للرصد والبحث الميداني ---\n"),
             font_name=current_font,
             readonly=True,
-            size_hint=(1, 0.4)
+            size_hint=(1, 0.3)
         )
         root_layout.add_widget(self.log_input)
         
@@ -215,17 +230,25 @@ class AlknasApp(App):
         popup = Popup(title=arabic_text("الملاحظات الميدانية السريعة"), content=content, size_hint=(0.8, 0.4))
         popup.open()
 
-    def trigger_save_record(self, instance):
-        # تسجيل لوحة تجريبية مع النطاق والملاحظة الحالية
-        path = self.field_manager.save_record_locally("ر ب ط", "6646")
+    def perform_search_and_record(self, instance):
+        plate = self.search_input.text.strip()
+        if not plate:
+            self.log_input.text += "\n" + arabic_text("[تنبيه]: يرجى إدخال أو نطق رقم اللوحة أولاً.")
+            return
+            
+        path = self.field_manager.save_record_locally(plate)
         if path:
-            msg = f"[تم الحفظ بنجاح]: الحي ({self.field_manager.current_district}) - الشارع ({self.field_manager.current_street})"
+            msg = f"[تم الرصد بنجاح]: اللوحة ({plate}) | الحي ({self.field_manager.current_district}) - ({self.field_manager.current_note})"
             self.log_input.text += "\n" + arabic_text(msg)
+            self.search_input.text = ""
         else:
             self.log_input.text += "\n" + arabic_text("[خطأ في الحفظ]")
 
+    def clear_log(self, instance):
+        self.log_input.text = arabic_text("--- تم مسح السجل ---")
+
     def show_status(self, instance):
-        self.log_input.text += "\n" + arabic_text("[النظام مستقر]: الإدارة الميدانية تعمل بكفاءة.")
+        self.log_input.text += "\n" + arabic_text("[النظام يعمل بكفاءة]: واجهة البحث والنطاق جاهزة.")
 
 if __name__ == '__main__':
     AlknasApp().run()

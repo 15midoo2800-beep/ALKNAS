@@ -21,8 +21,8 @@ source.exclude_dirs = tests, bin, .git
 # (str) Application versioning (method 1)
 version = 1.0.0
 
-# (list) Application requirements
-requirements = python3,kivy,pandas,openpyxl,arabic-reshaper,python-bidi
+# (list) Application requirements (نسخة مستقرة ونظيفة لتجنب أخطاء البناء)
+requirements = python3,kivy,arabic-reshaper
 
 # (str) Supported orientation (one of landscape, sensorLandscape, portrait or all)
 orientation = portrait
